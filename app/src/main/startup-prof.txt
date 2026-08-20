@@ -1,0 +1,5 @@
+# 首帧前需要优先布局到主 dex 的入口类。
+Lcom/ngaclient/app/NgaApplication;
+Lcom/ngaclient/app/MainActivity;
+Lcom/ngaclient/app/ui/NgaNavHostKt;
+Lcom/ngaclient/app/ui/board/BoardScreenKt;

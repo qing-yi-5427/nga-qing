@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Self-contained platform theme. The Compose UI is themed entirely in Kotlin
+      (Material3 color schemes via NgaQingTheme), so the Android activity theme
+      only needs to provide a NoActionBar window with transparent system bars for
+      edge-to-edge rendering. It deliberately does NOT depend on Material3's
+      Android resources (which this build's material3 variant does not ship).
+    -->
+    <style name="Theme.NgaQing" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>

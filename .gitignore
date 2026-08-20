@@ -1,0 +1,22 @@
+# Android Studio and Gradle
+.gradle/
+.kotlin/
+.idea/
+**/build/
+*.iml
+local.properties
+
+# Native and generated tooling output
+.cxx/
+.externalNativeBuild/
+captures/
+
+# Local packages and signing material
+*.apk
+*.aab
+*.jks
+*.keystore
+
+# OS metadata
+.DS_Store
+Thumbs.db
