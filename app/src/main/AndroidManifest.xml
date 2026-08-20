@@ -5,7 +5,7 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application
-        android:name="com.ngaclient.app.NgaApplication"
+        android:name="com.qingyi5427.ngaqing.NgaApplication"
         android:allowBackup="true"
         android:enableOnBackInvokedCallback="true"
         android:icon="@mipmap/ic_launcher"
@@ -15,7 +15,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.NgaQing">
         <activity
-            android:name="com.ngaclient.app.MainActivity"
+            android:name="com.qingyi5427.ngaqing.MainActivity"
             android:exported="true"
             android:theme="@style/Theme.NgaQing">
             <intent-filter>

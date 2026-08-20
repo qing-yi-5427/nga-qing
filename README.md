@@ -24,7 +24,7 @@ Windows 可使用：
 .\gradlew.bat testDebugUnitTest lintDebug assembleRelease
 ```
 
-Android `applicationId` 暂时保留为 `com.ngaclient.app`，用于兼容现有安装、登录状态、收藏和浏览历史。
+Android `applicationId` 为 `com.qingyi5427.ngaqing`。从旧版 `com.ngaclient.app` 迁移时，Android 会将其视为独立应用，不继承原有登录状态、收藏或浏览历史。
 
 ## 来源与许可
 

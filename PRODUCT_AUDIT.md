@@ -101,8 +101,8 @@
 - WebView 手势事件链真机验证：纯竖滑从 0 滚至 9310px，带 250px 横向偏移的斜向竖滑继续滚至 36467px，纯横滑不触发应用返回（backCount=0）。
 - 启动及上述操作期间未发现 AndroidRuntime、Room 或 SQLite 崩溃。
 - MIUI 已开启“USB 调试（安全设置）”，后续可以继续执行真机自动化手势与滚动验证。
-- 项目及应用名称已统一为 `nga-qing`；保留 `com.ngaclient.app` 包名以兼容已有安装数据，请求中不再使用其他客户端的身份标识。
-- 最终 Release APK：`nga-qing-release.apk`，SHA-256：`A0A1D06267C677C04140D0DD710147709DB3D5F7B603EC6BA1B4F5A0353A3428`。
+- 项目及应用名称已统一为 `nga-qing`，Android `applicationId` 为 `com.qingyi5427.ngaqing`；不兼容旧版 `com.ngaclient.app` 的安装数据，请求中不再使用其他客户端的身份标识。
+- 最终 Release APK：`nga-qing-release.apk`，SHA-256：`DFF1482C5A49513A55440EBE871D1AF7E086ED9A32B42011A61E08674B9B55EB`。
 
 ## 参考
 

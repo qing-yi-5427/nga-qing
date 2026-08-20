@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.ngaclient.app.benchmark"
+    namespace = "com.qingyi5427.ngaqing.benchmark"
     compileSdk = 35
 
     defaultConfig {

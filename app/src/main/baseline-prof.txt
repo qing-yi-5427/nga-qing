@@ -1,9 +1,9 @@
 # MIUI 禁止测试工具注入输入事件时的可发布兜底基线。
 # 覆盖应用启动、导航、三类主列表、正文解析和图片加载的热路径。
-HSPLcom/ngaclient/app/MainActivity;-><init>()V
-HSPLcom/ngaclient/app/NgaApplication;-><init>()V
-Lcom/ngaclient/app/ui/**
-Lcom/ngaclient/app/data/repository/**
-Lcom/ngaclient/app/data/remote/**
-Lcom/ngaclient/app/data/local/**
+HSPLcom/qingyi5427/ngaqing/MainActivity;-><init>()V
+HSPLcom/qingyi5427/ngaqing/NgaApplication;-><init>()V
+Lcom/qingyi5427/ngaqing/ui/**
+Lcom/qingyi5427/ngaqing/data/repository/**
+Lcom/qingyi5427/ngaqing/data/remote/**
+Lcom/qingyi5427/ngaqing/data/local/**
 Lcoil/compose/**

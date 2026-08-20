@@ -12,11 +12,11 @@ base {
 }
 
 android {
-    namespace = "com.ngaclient.app"
+    namespace = "com.qingyi5427.ngaqing"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.ngaclient.app"
+        applicationId = "com.qingyi5427.ngaqing"
         minSdk = 24
         targetSdk = 35
         versionCode = 1
