@@ -2,8 +2,6 @@
 
 `nga-qing` 是一个使用 Kotlin、Jetpack Compose 和 Material 3 编写的非官方 NGA Android 客户端。
 
-本项目与 NGA、NGA 官方客户端、`nga-just-works` 或 MNGA 不存在隶属、授权或背书关系。
-
 ## 当前能力
 
 - 版块目录、父子版块和合集分类
