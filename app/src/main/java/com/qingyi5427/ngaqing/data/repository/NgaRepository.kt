@@ -67,6 +67,24 @@ internal fun normalizeNgaAvatarUrl(raw: String): String {
     ) { match -> "http://${match.groupValues[1]}${match.groupValues[2]}" }
 }
 
+/** Resolve relative media URLs hidden inside NGA's legacy [flash] attachment tags. */
+internal fun absolutizeNgaMediaTags(content: String, attachmentsPrefix: String): String {
+    if (attachmentsPrefix.isBlank()) return content
+    return content.replace(
+        Regex(
+            """(\[flash(?:=(?:video|audio))?\])\s*\./((?:attachments/|mon_\d{6}/)[^\[\r\n]+?)\s*(\[/flash\])""",
+            RegexOption.IGNORE_CASE
+        )
+    ) { match ->
+        val relative = if (attachmentsPrefix.endsWith("/attachments/", ignoreCase = true)) {
+            match.groupValues[2].removePrefix("attachments/")
+        } else {
+            match.groupValues[2]
+        }
+        "${match.groupValues[1]}$attachmentsPrefix$relative${match.groupValues[3]}"
+    }
+}
+
 internal fun buildBoardGroup(
     categoryName: String,
     groupName: String,
@@ -504,6 +522,9 @@ class NgaRepository @Inject constructor(
             s = s.replace(Regex("""\[img[^\]]*\]\./?(attachments/|mon_\d{6}/)([^\]]*)\[/img]""", RegexOption.IGNORE_CASE)) { m ->
                 "[img]$prefix${m.groupValues[1]}${m.groupValues[2]}[/img]"
             }
+            // NGA 仍使用历史 [flash] 标签承载 MP4/音频附件。先在数据层把相对附件
+            // 地址补全，正文解析器才能把它渲染为可点击的媒体卡片。
+            s = absolutizeNgaMediaTags(s, prefix)
         }
         // 3) NGA 的 GIF 缩略图路径是 xxx.gif.thumb_ss.jpg，直接请求会 404；还原成 xxx.gif
         s = s.replace(Regex("""(https?://\S+\.gif)\.(thumb_s|medium|thumb|thumb_ss)\.jpg""", RegexOption.IGNORE_CASE), "$1")

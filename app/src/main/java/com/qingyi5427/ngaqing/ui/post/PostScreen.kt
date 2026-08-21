@@ -56,6 +56,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonSearch
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -959,6 +960,66 @@ private fun RenderBlock(
                             ContentImageState.Success -> Unit
                         }
                     }
+                }
+            }
+        }
+        is PostBlock.Media -> {
+            if (block.url.isBlank()) return
+            val context = LocalContext.current
+            val (title, hint) = when (block.kind) {
+                MediaKind.Video -> "视频附件" to "点击播放"
+                MediaKind.Audio -> "音频附件" to "点击播放"
+                MediaKind.External -> "媒体附件" to "点击打开"
+            }
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 5.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable {
+                        runCatching {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(block.url))
+                            )
+                        }.onFailure {
+                            Toast.makeText(context, "找不到可打开该附件的应用", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        modifier = Modifier.size(38.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                modifier = Modifier.size(23.dp)
+                            )
+                        }
+                    }
+                    Column(Modifier.padding(start = 12.dp)) {
+                        Text(title, style = MaterialTheme.typography.labelLarge)
+                        Text(
+                            hint,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Icon(
+                        imageVector = Icons.Default.OpenInBrowser,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
             }
         }

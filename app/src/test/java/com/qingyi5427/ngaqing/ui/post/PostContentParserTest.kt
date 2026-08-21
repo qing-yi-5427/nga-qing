@@ -40,6 +40,25 @@ class PostContentParserTest {
     }
 
     @Test
+    fun parsesLegacyFlashMp4AsVideoAttachment() {
+        val media = PostContentParser.parse(
+            "[flash]https://img.nga.cn/attachments/mon_202608/20/example.mp4[/flash]"
+        ).filterIsInstance<PostBlock.Media>().single()
+
+        assertEquals("https://img.nga.cn/attachments/mon_202608/20/example.mp4", media.url)
+        assertEquals(MediaKind.Video, media.kind)
+    }
+
+    @Test
+    fun respectsExplicitAudioAttachmentType() {
+        val media = PostContentParser.parse(
+            "[flash=audio]https://img.nga.cn/attachments/example.bin[/flash]"
+        ).filterIsInstance<PostBlock.Media>().single()
+
+        assertEquals(MediaKind.Audio, media.kind)
+    }
+
+    @Test
     fun hidesUnsupportedPresentationTagsInsideQuotes() {
         val text = PostContentParser.parse(
             "[quote][color=blue][size=110%]公告[/size][/color][/quote]"

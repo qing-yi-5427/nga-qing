@@ -102,7 +102,7 @@
 - 启动及上述操作期间未发现 AndroidRuntime、Room 或 SQLite 崩溃。
 - MIUI 已开启“USB 调试（安全设置）”，后续可以继续执行真机自动化手势与滚动验证。
 - 项目及应用名称已统一为 `nga-qing`，Android `applicationId` 为 `com.qingyi5427.ngaqing`；不兼容旧版 `com.ngaclient.app` 的安装数据，请求中不再使用其他客户端的身份标识。
-- 最终 Release APK：`nga-qing-release.apk`，SHA-256：`DFF1482C5A49513A55440EBE871D1AF7E086ED9A32B42011A61E08674B9B55EB`。
+- 最终 Release APK：`nga-qing-release.apk`，SHA-256：`3C85C338FE14D4613DA884BB4C45646D4072156D4E10AB41F1788598E9031A1F`。
 
 ## 参考
 

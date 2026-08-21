@@ -10,12 +10,15 @@ import com.qingyi5427.ngaqing.data.remote.NgaResourceUrls
 sealed interface PostBlock {
     data class Text(val text: String, val bold: Boolean = false, val strike: Boolean = false) : PostBlock
     data class Img(val url: String, val emote: Boolean = false) : PostBlock
+    data class Media(val url: String, val kind: MediaKind) : PostBlock
     data class Quote(
         val blocks: List<PostBlock>,
         val refName: String? = null,
         val floor: Int? = null
     ) : PostBlock
 }
+
+enum class MediaKind { Video, Audio, External }
 
 /** 已在后台准备好的单层正文，避免列表组合阶段解析 HTML/BBCode。 */
 @Immutable
@@ -49,6 +52,10 @@ object PostContentParser {
     private val DEL_RE = Regex("""\[del\]([\s\S]*?)\[/del\]""", RegexOption.IGNORE_CASE)
     private val URL_RE = Regex("""\[url=([^\]]+)\]([\s\S]*?)\[/url\]""", RegexOption.IGNORE_CASE)
     private val URL_PLAIN_RE = Regex("""\[url\]([\s\S]*?)\[/url\]""", RegexOption.IGNORE_CASE)
+    private val FLASH_RE = Regex(
+        """\[flash(?:=(video|audio))?\]([\s\S]*?)\[/flash\]""",
+        RegexOption.IGNORE_CASE
+    )
     private val HTML_IMG_RE = Regex("""<img\b[^>]*>""", RegexOption.IGNORE_CASE)
     private val HTML_BOLD_RE = Regex("""<b\b[^>]*>([\s\S]*?)</b\s*>""", RegexOption.IGNORE_CASE)
     private val HTML_ITALIC_RE = Regex("""<i\b[^>]*>([\s\S]*?)</i\s*>""", RegexOption.IGNORE_CASE)
@@ -63,6 +70,7 @@ object PostContentParser {
             """\[s:[^:\]]+:[^:\]]+\]|""" +
             """\[b\][\s\S]*?\[/b\]|\[del\][\s\S]*?\[/del\]|""" +
             """\[url(?:=[^\]]*)?\][\s\S]*?\[/url\]|""" +
+            """\[flash(?:=(?:video|audio))?\][\s\S]*?\[/flash\]|""" +
             """\u0001IMG\u0002[\s\S]*?\u0001IMG\u0002|""" +
             """<br\s*/?>|<b\b[^>]*>[\s\S]*?</b\s*>|<i\b[^>]*>[\s\S]*?</i\s*>""",
         RegexOption.IGNORE_CASE
@@ -114,6 +122,37 @@ object PostContentParser {
                     val um = URL_RE.find(v) ?: URL_PLAIN_RE.find(v)
                     val inner = um?.groupValues?.getOrNull(um.groupValues.size - 1) ?: ""
                     out += parseInner(inner, users, bold, strike)
+                }
+                v.startsWith("[flash", ignoreCase = true) -> {
+                    val fm = FLASH_RE.find(v)
+                    if (fm != null) {
+                        val rawUrl = fm.groupValues[2].trim().replace("&amp;", "&")
+                        val url = NgaResourceUrls.normalizeLegacyImageHosts(
+                            if (rawUrl.startsWith("//")) "https:$rawUrl" else rawUrl
+                        )
+                        val explicitKind = fm.groupValues[1].lowercase()
+                        val kind = when {
+                            explicitKind == "video" -> MediaKind.Video
+                            explicitKind == "audio" -> MediaKind.Audio
+                            url.substringBefore('?').endsWith(".mp4", ignoreCase = true) ||
+                                url.substringBefore('?').endsWith(".webm", ignoreCase = true) ||
+                                url.substringBefore('?').endsWith(".mov", ignoreCase = true) ||
+                                url.substringBefore('?').endsWith(".m3u8", ignoreCase = true) -> MediaKind.Video
+                            url.substringBefore('?').endsWith(".mp3", ignoreCase = true) ||
+                                url.substringBefore('?').endsWith(".m4a", ignoreCase = true) ||
+                                url.substringBefore('?').endsWith(".aac", ignoreCase = true) ||
+                                url.substringBefore('?').endsWith(".wav", ignoreCase = true) ||
+                                url.substringBefore('?').endsWith(".ogg", ignoreCase = true) -> MediaKind.Audio
+                            else -> MediaKind.External
+                        }
+                        if (url.startsWith("http://", ignoreCase = true) ||
+                            url.startsWith("https://", ignoreCase = true)
+                        ) {
+                            out += PostBlock.Media(url, kind)
+                        } else {
+                            out += PostBlock.Text("[媒体附件暂不可用]", bold, strike)
+                        }
+                    }
                 }
                 v.startsWith("\u0001IMG\u0002", ignoreCase = true) -> {
                     val inner = v.removePrefix(IMG_MARK).removeSuffix(IMG_MARK).trim()
