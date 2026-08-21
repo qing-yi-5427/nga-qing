@@ -966,10 +966,10 @@ private fun RenderBlock(
         is PostBlock.Media -> {
             if (block.url.isBlank()) return
             val context = LocalContext.current
-            val (title, hint) = when (block.kind) {
-                MediaKind.Video -> "视频附件" to "点击播放"
-                MediaKind.Audio -> "音频附件" to "点击播放"
-                MediaKind.External -> "媒体附件" to "点击打开"
+            val (title, hint, mimeType) = when (block.kind) {
+                MediaKind.Video -> Triple("视频附件", "选择应用播放", "video/*")
+                MediaKind.Audio -> Triple("音频附件", "选择应用播放", "audio/*")
+                MediaKind.External -> Triple("媒体附件", "选择应用打开", "*/*")
             }
             Surface(
                 modifier = Modifier
@@ -978,8 +978,11 @@ private fun RenderBlock(
                     .clip(RoundedCornerShape(10.dp))
                     .clickable {
                         runCatching {
+                            val openIntent = Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(Uri.parse(block.url), mimeType)
+                            }
                             context.startActivity(
-                                Intent(Intent.ACTION_VIEW, Uri.parse(block.url))
+                                Intent.createChooser(openIntent, "选择打开方式")
                             )
                         }.onFailure {
                             Toast.makeText(context, "找不到可打开该附件的应用", Toast.LENGTH_SHORT).show()
