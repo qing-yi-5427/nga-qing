@@ -2,6 +2,7 @@ package com.qingyi5427.ngaqing.data.repository
 
 import android.content.Context
 import android.util.Log
+import androidx.room.withTransaction
 import com.qingyi5427.ngaqing.data.local.AppDatabase
 import com.qingyi5427.ngaqing.data.local.FavoriteEntity
 import com.qingyi5427.ngaqing.data.local.FavoriteBoardEntity
@@ -750,6 +751,18 @@ class NgaRepository @Inject constructor(
 
     suspend fun removeFavoriteBoard(fid: String, stid: String?) {
         db.favoriteBoardDao().deleteByKey(boardKey(fid, stid))
+    }
+
+    suspend fun reorderFavoriteBoards(boards: List<Board>) {
+        val newestOrder = System.currentTimeMillis()
+        db.withTransaction {
+            boards.forEachIndexed { index, board ->
+                db.favoriteBoardDao().updateOrder(
+                    key = boardKey(board.fid, board.stid),
+                    orderValue = newestOrder - index
+                )
+            }
+        }
     }
 
     // ---------- Login state ----------

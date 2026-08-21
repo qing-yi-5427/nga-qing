@@ -2,6 +2,8 @@ package com.qingyi5427.ngaqing.ui.board
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -19,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material3.CircularProgressIndicator
@@ -34,6 +37,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
@@ -43,11 +48,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
@@ -58,6 +67,7 @@ import com.qingyi5427.ngaqing.ui.Routes
 import com.qingyi5427.ngaqing.ui.chrome.AppBottomBar
 import com.qingyi5427.ngaqing.ui.chrome.AppTopBar
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
@@ -107,7 +117,13 @@ fun BoardScreen(nav: NavHostController, viewModel: BoardViewModel = hiltViewMode
                 ) { CircularProgressIndicator() }
 
                 is BoardUiState.Error -> ErrorState(current.msg, viewModel::load)
-                is BoardUiState.Success -> BoardList(current.groups, favoriteBoards, listState, nav)
+                is BoardUiState.Success -> BoardList(
+                    current.groups,
+                    favoriteBoards,
+                    listState,
+                    viewModel::reorderFavoriteBoards,
+                    nav
+                )
             }
         }
         AppBottomBar(nav, Routes.BOARDS)
@@ -119,16 +135,24 @@ private fun BoardList(
     groups: List<BoardGroup>,
     favoriteBoards: List<Board>,
     listState: LazyListState,
+    onFavoriteOrderChanged: (List<Board>) -> Unit,
     nav: NavHostController
 ) {
     val categories = groups.groupBy { it.categoryName }
     var collapsed by rememberSaveable { mutableStateOf(emptySet<String>()) }
+    val orderedFavoriteBoards = remember { mutableStateOf(favoriteBoards) }
+    var draggingFavoriteKey by remember { mutableStateOf<String?>(null) }
+    val dragScope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
+    LaunchedEffect(favoriteBoards) {
+        if (draggingFavoriteKey == null) orderedFavoriteBoards.value = favoriteBoards
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         state = listState,
         contentPadding = PaddingValues(bottom = 16.dp)
     ) {
-        if (favoriteBoards.isNotEmpty()) {
+        if (orderedFavoriteBoards.value.isNotEmpty()) {
             val favoritesKey = "favorite-boards"
             val favoritesExpanded = favoritesKey !in collapsed
             item(key = favoritesKey, contentType = "section-header") {
@@ -136,9 +160,93 @@ private fun BoardList(
                     collapsed = collapsed.toggle(favoritesKey)
                 }
             }
-            if (favoritesExpanded) favoriteBoards.forEach { board ->
-                item(key = "favorite-${board.fid}-${board.stid.orEmpty()}", contentType = "board-row") {
-                    BoardRow(board, isChild = false) {
+            if (favoritesExpanded) orderedFavoriteBoards.value.forEach { board ->
+                val boardKey = favoriteBoardKey(board)
+                val itemKey = "favorite-$boardKey"
+                item(key = itemKey, contentType = "board-row") {
+                    var dragOffset by remember(boardKey) { mutableFloatStateOf(0f) }
+                    var lastSwapTarget by remember(boardKey) { mutableStateOf<String?>(null) }
+                    var orderChanged by remember(boardKey) { mutableStateOf(false) }
+                    val dragging = draggingFavoriteKey == boardKey
+                    BoardRow(
+                        board = board,
+                        isChild = false,
+                        showDragHandle = true,
+                        modifier = Modifier
+                            .zIndex(if (dragging) 1f else 0f)
+                            .graphicsLayer {
+                                translationY = dragOffset
+                                shadowElevation = if (dragging) 12.dp.toPx() else 0f
+                                shape = RoundedCornerShape(14.dp)
+                            }
+                            .background(
+                                if (dragging) MaterialTheme.colorScheme.surfaceContainerHigh
+                                else Color.Transparent
+                            )
+                            .pointerInput(boardKey) {
+                                fun finishDrag() {
+                                    val finalOrder = orderedFavoriteBoards.value
+                                    dragOffset = 0f
+                                    lastSwapTarget = null
+                                    draggingFavoriteKey = null
+                                    if (orderChanged) onFavoriteOrderChanged(finalOrder)
+                                    orderChanged = false
+                                }
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = {
+                                        lastSwapTarget = null
+                                        orderChanged = false
+                                        draggingFavoriteKey = boardKey
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    },
+                                    onDrag = { change, dragAmount ->
+                                        change.consume()
+                                        dragOffset += dragAmount.y
+                                        val layoutInfo = listState.layoutInfo
+                                        val draggedInfo = layoutInfo.visibleItemsInfo
+                                            .firstOrNull { it.key == itemKey }
+                                            ?: return@detectDragGesturesAfterLongPress
+                                        val draggedCenter = draggedInfo.offset +
+                                            draggedInfo.size / 2f + dragOffset
+                                        val targetInfo = layoutInfo.visibleItemsInfo.firstOrNull { info ->
+                                            val key = info.key as? String
+                                            (key?.startsWith("favorite-fid:") == true ||
+                                                key?.startsWith("favorite-stid:") == true) &&
+                                                draggedCenter >= info.offset &&
+                                                draggedCenter <= info.offset + info.size
+                                        }
+                                        if (targetInfo == null || targetInfo.key == itemKey) {
+                                            lastSwapTarget = null
+                                        } else if (targetInfo.key != lastSwapTarget) {
+                                            lastSwapTarget = targetInfo.key as String
+                                            val targetBoardKey = (targetInfo.key as String)
+                                                .removePrefix("favorite-")
+                                            val moved = moveFavoriteBoard(
+                                                orderedFavoriteBoards.value,
+                                                boardKey,
+                                                targetBoardKey
+                                            )
+                                            if (moved !== orderedFavoriteBoards.value) {
+                                                dragOffset += draggedInfo.offset - targetInfo.offset
+                                                orderedFavoriteBoards.value = moved
+                                                orderChanged = true
+                                            }
+                                        }
+                                        val edge = 72.dp.toPx()
+                                        val scrollBy = when {
+                                            draggedCenter < layoutInfo.viewportStartOffset + edge -> -20.dp.toPx()
+                                            draggedCenter > layoutInfo.viewportEndOffset - edge -> 20.dp.toPx()
+                                            else -> 0f
+                                        }
+                                        if (scrollBy != 0f) {
+                                            dragScope.launch { listState.scrollBy(scrollBy) }
+                                        }
+                                    },
+                                    onDragEnd = ::finishDrag,
+                                    onDragCancel = ::finishDrag
+                                )
+                            }
+                    ) {
                         nav.navigate(Routes.threadRoute(board.fid, board.name, board.stid))
                     }
                 }
@@ -247,10 +355,12 @@ private fun BoardRow(
     isChild: Boolean,
     expanded: Boolean? = null,
     onToggle: (() -> Unit)? = null,
+    showDragHandle: Boolean = false,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     Row(
-        Modifier.fillMaxWidth()
+        modifier.fillMaxWidth()
             .background(
                 if (isChild) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.18f)
                 else Color.Transparent
@@ -291,7 +401,13 @@ private fun BoardRow(
                 )
             }
         }
-        if (expanded != null && onToggle != null) {
+        if (showDragHandle) {
+            Icon(
+                Icons.Filled.DragHandle,
+                contentDescription = "长按拖动${board.name}排序",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else if (expanded != null && onToggle != null) {
             CollapseButton(expanded, onToggle, board.name)
         } else {
             Icon(

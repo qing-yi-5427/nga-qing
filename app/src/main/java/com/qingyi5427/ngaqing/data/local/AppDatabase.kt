@@ -90,6 +90,9 @@ interface FavoriteBoardDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(item: FavoriteBoardEntity)
 
+    @Query("UPDATE favorite_boards SET addedAt = :orderValue WHERE `key` = :key")
+    suspend fun updateOrder(key: String, orderValue: Long)
+
     @Query("DELETE FROM favorite_boards WHERE `key` = :key")
     suspend fun deleteByKey(key: String)
 }

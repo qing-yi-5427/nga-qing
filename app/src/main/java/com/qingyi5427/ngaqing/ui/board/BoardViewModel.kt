@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.qingyi5427.ngaqing.data.model.BoardGroup
+import com.qingyi5427.ngaqing.data.model.Board
 import com.qingyi5427.ngaqing.data.repository.NgaRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -68,8 +69,28 @@ class BoardViewModel @Inject constructor(
         savedStateHandle[SCROLL_OFFSET] = offset.coerceAtLeast(0)
     }
 
+    fun reorderFavoriteBoards(boards: List<Board>) {
+        viewModelScope.launch { repo.reorderFavoriteBoards(boards) }
+    }
+
     private companion object {
         const val SCROLL_INDEX = "board_scroll_index"
         const val SCROLL_OFFSET = "board_scroll_offset"
+    }
+}
+
+internal fun favoriteBoardKey(board: Board): String =
+    board.stid?.takeIf { it.isNotBlank() }?.let { "stid:$it" } ?: "fid:${board.fid}"
+
+internal fun moveFavoriteBoard(
+    boards: List<Board>,
+    draggedKey: String,
+    targetKey: String
+): List<Board> {
+    val from = boards.indexOfFirst { favoriteBoardKey(it) == draggedKey }
+    val to = boards.indexOfFirst { favoriteBoardKey(it) == targetKey }
+    if (from < 0 || to < 0 || from == to) return boards
+    return boards.toMutableList().apply {
+        add(to, removeAt(from))
     }
 }
