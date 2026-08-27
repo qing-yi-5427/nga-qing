@@ -11,6 +11,8 @@ sealed interface PostBlock {
     data class Text(val text: String, val bold: Boolean = false, val strike: Boolean = false) : PostBlock
     data class Img(val url: String, val emote: Boolean = false) : PostBlock
     data class Media(val url: String, val kind: MediaKind) : PostBlock
+    data class Table(val rows: List<List<String>>) : PostBlock
+    data class Collapse(val title: String?, val blocks: List<PostBlock>) : PostBlock
     data class Quote(
         val blocks: List<PostBlock>,
         val refName: String? = null,
@@ -56,6 +58,22 @@ object PostContentParser {
         """\[flash(?:=(video|audio))?\]([\s\S]*?)\[/flash\]""",
         RegexOption.IGNORE_CASE
     )
+    private val TABLE_RE = Regex(
+        """\[table(?:=[^\]]*)?\]([\s\S]*?)\[/table\]""",
+        RegexOption.IGNORE_CASE
+    )
+    private val TABLE_ROW_RE = Regex(
+        """\[tr(?:=[^\]]*)?\]([\s\S]*?)\[/tr\]""",
+        RegexOption.IGNORE_CASE
+    )
+    private val TABLE_CELL_RE = Regex(
+        """\[td(?:=[^\]]*)?\]([\s\S]*?)\[/td\]""",
+        RegexOption.IGNORE_CASE
+    )
+    private val COLLAPSE_RE = Regex(
+        """\[collapse(?:=([^\]]*))?\]([\s\S]*?)\[/collapse\]""",
+        RegexOption.IGNORE_CASE
+    )
     private val HTML_IMG_RE = Regex("""<img\b[^>]*>""", RegexOption.IGNORE_CASE)
     private val HTML_BOLD_RE = Regex("""<b\b[^>]*>([\s\S]*?)</b\s*>""", RegexOption.IGNORE_CASE)
     private val HTML_ITALIC_RE = Regex("""<i\b[^>]*>([\s\S]*?)</i\s*>""", RegexOption.IGNORE_CASE)
@@ -66,7 +84,9 @@ object PostContentParser {
         RegexOption.IGNORE_CASE
     )
     private val COMBINED_RE = Regex(
-        """\[quote(?:x)?\][\s\S]*?\[/quote(?:x)?\]|""" +
+        """\[collapse(?:=[^\]]*)?\][\s\S]*?\[/collapse\]|""" +
+            """\[table(?:=[^\]]*)?\][\s\S]*?\[/table\]|""" +
+            """\[quote(?:x)?\][\s\S]*?\[/quote(?:x)?\]|""" +
             """\[s:[^:\]]+:[^:\]]+\]|""" +
             """\[b\][\s\S]*?\[/b\]|\[del\][\s\S]*?\[/del\]|""" +
             """\[url(?:=[^\]]*)?\][\s\S]*?\[/url\]|""" +
@@ -101,6 +121,8 @@ object PostContentParser {
             }
             val v = m.value
             when {
+                v.startsWith("[collapse", ignoreCase = true) -> out += renderCollapse(v, users)
+                v.startsWith("[table", ignoreCase = true) -> renderTable(v)?.let(out::add)
                 v.startsWith("[quote", ignoreCase = true) -> out += renderQuote(v, users)
                 v.startsWith("[s:", ignoreCase = true) -> {
                     val sm = SMILE_RE.find(v)
@@ -176,6 +198,44 @@ object PostContentParser {
         return out
     }
 
+    private fun renderCollapse(collapse: String, users: Map<String, String>): PostBlock.Collapse {
+        val match = COLLAPSE_RE.find(collapse)
+            ?: return PostBlock.Collapse(title = null, blocks = emptyList())
+        val title = decodeEntities(match.groupValues[1]).trim().ifEmpty { null }
+        return PostBlock.Collapse(
+            title = title,
+            blocks = parseInner(match.groupValues[2], users, bold = false, strike = false)
+        )
+    }
+
+    /**
+     * NGA 的表格在窄屏上不适合照搬网页宽度，这里保留行列语义并交给 Compose
+     * 做移动端排版。格式不完整时返回 null，让原文继续走普通文本兜底。
+     */
+    private fun renderTable(table: String): PostBlock.Table? {
+        val body = TABLE_RE.find(table)?.groupValues?.getOrNull(1) ?: return null
+        val rows = TABLE_ROW_RE.findAll(body).mapNotNull { rowMatch ->
+            val cells = TABLE_CELL_RE.findAll(rowMatch.groupValues[1])
+                .map { cleanTableCell(it.groupValues[1]) }
+                .toList()
+            cells.takeIf { it.isNotEmpty() }
+        }.toList()
+        return rows.takeIf { it.isNotEmpty() }?.let(PostBlock::Table)
+    }
+
+    private fun cleanTableCell(cell: String): String {
+        var text = BR_RE.replace(cell, "\n")
+        text = URL_RE.replace(text) { it.groupValues[2] }
+        text = URL_PLAIN_RE.replace(text) { it.groupValues[1] }
+        text = SMILE_RE.replace(text) { "[表情:${it.groupValues[2]}]" }
+        text = IMG_BB_RE.replace(text, "[图片]")
+        text = Regex(
+            """\[/?(?:b|del|color|size|font|align|u|i)(?:=[^\]]*)?\]""",
+            RegexOption.IGNORE_CASE
+        ).replace(text, "")
+        return cleanText(text).trim()
+    }
+
     private fun renderQuote(quote: String, users: Map<String, String>): PostBlock.Quote {
         val m = QUOTE_RE.find(quote) ?: return PostBlock.Quote(emptyList())
         val inner = m.groupValues[1]
@@ -202,10 +262,26 @@ object PostContentParser {
         // NGA 的历史正文常混有只负责展示的 BBCode。当前原生渲染器不复刻
         // 任意字号/颜色，但也不应把这些标记当正文展示给用户。
         t = PRESENTATION_TAG_RE.replace(t, "")
-        t = t.replace("&nbsp;", " ").replace("&amp;", "&")
+        t = decodeEntities(t)
+        // 零宽空格常由 NGA 编辑器插入用于占位，不应影响换行或被复制出来。
+        t = t.replace("\u200B", "")
+        return t
+    }
+
+    private fun decodeEntities(source: String): String {
+        var text = source.replace("&nbsp;", " ").replace("&amp;", "&")
             .replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"")
             .replace("&#39;", "'")
-        return t
+        text = Regex("""&#(?:x([0-9a-fA-F]+)|(\d+));""").replace(text) { match ->
+            val codePoint = match.groupValues[1].takeIf(String::isNotEmpty)?.toIntOrNull(16)
+                ?: match.groupValues[2].toIntOrNull()
+            if (codePoint != null && Character.isValidCodePoint(codePoint)) {
+                String(Character.toChars(codePoint))
+            } else {
+                match.value
+            }
+        }
+        return text
     }
 
 }

@@ -49,6 +49,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SwapVert
@@ -1023,6 +1025,110 @@ private fun RenderBlock(
                         contentDescription = null,
                         modifier = Modifier.size(20.dp)
                     )
+                }
+            }
+        }
+        is PostBlock.Table -> {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                block.rows.forEachIndexed { rowIndex, cells ->
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(9.dp),
+                        color = if (rowIndex % 2 == 0) {
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.58f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.34f)
+                        }
+                    ) {
+                        if (cells.size == 2) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                Text(
+                                    cells[0],
+                                    modifier = Modifier.weight(1.8f),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(Modifier.width(12.dp))
+                                Text(
+                                    cells[1],
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        } else {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                cells.forEachIndexed { cellIndex, cell ->
+                                    Text(
+                                        cell,
+                                        style = if (cellIndex == 0) {
+                                            MaterialTheme.typography.bodyMedium
+                                        } else {
+                                            MaterialTheme.typography.bodySmall
+                                        },
+                                        color = if (cellIndex == 0) {
+                                            MaterialTheme.colorScheme.onSurface
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        is PostBlock.Collapse -> {
+            var expanded by remember(block) { mutableStateOf(false) }
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp),
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.48f),
+                contentColor = MaterialTheme.colorScheme.onSurface
+            ) {
+                Column {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { expanded = !expanded }
+                            .padding(horizontal = 12.dp, vertical = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            block.title ?: "折叠内容",
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Icon(
+                            imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = if (expanded) "收起" else "展开",
+                            modifier = Modifier.size(21.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (expanded) {
+                        Column(
+                            modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 11.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            block.blocks.forEach { RenderBlock(it, onImage, onJumpToFloor) }
+                        }
+                    }
                 }
             }
         }
