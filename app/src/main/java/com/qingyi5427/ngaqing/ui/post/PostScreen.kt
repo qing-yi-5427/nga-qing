@@ -1132,6 +1132,46 @@ private fun RenderBlock(
                 }
             }
         }
+        is PostBlock.ReplyTo -> {
+            val floor = block.floor
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+                    .then(
+                        if (floor != null) Modifier.clickable { onJumpToFloor(floor) } else Modifier
+                    ),
+                shape = RoundedCornerShape(9.dp),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.46f),
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 11.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Reply,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.width(7.dp))
+                    Text(
+                        "回复 @${block.refName}",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    if (floor != null) {
+                        Text(
+                            "#$floor",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
         is PostBlock.Quote -> {
             val floor = block.floor
             val quoteAccent = MaterialTheme.colorScheme.primary.copy(alpha = 0.72f)

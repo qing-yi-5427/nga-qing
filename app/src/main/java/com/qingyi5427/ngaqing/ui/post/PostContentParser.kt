@@ -13,6 +13,7 @@ sealed interface PostBlock {
     data class Media(val url: String, val kind: MediaKind) : PostBlock
     data class Table(val rows: List<List<String>>) : PostBlock
     data class Collapse(val title: String?, val blocks: List<PostBlock>) : PostBlock
+    data class ReplyTo(val refName: String, val floor: Int?) : PostBlock
     data class Quote(
         val blocks: List<PostBlock>,
         val refName: String? = null,
@@ -30,6 +31,9 @@ data class PostRenderData(
     val comments: List<List<PostBlock>>
 )
 
+@Immutable
+data class PostReplyTarget(val refName: String, val floor: Int)
+
 /**
  * 把 NGA 帖子正文（HTML + BBCode 混合：<img>/[img]/[quote]/[b]/[del]/[s:组:名]/<br/> 等）
  * 解析成 [PostBlock] 列表，供 Compose 直接渲染。
@@ -42,6 +46,11 @@ data class PostRenderData(
  */
 object PostContentParser {
 
+    private const val REPLY_TO_PATTERN =
+        """(?:\[b\]\s*)?Reply\s+to\s+\[pid=(\d+),(\d+),(\d+)\](?:Reply)?\[/pid\]\s*""" +
+            """Post\s+by\s+\[uid=(\d+)\]([\s\S]*?)\[/uid\]\s*""" +
+            """(?:\([^)]+\))?(?:\s*\[/b\])?"""
+    private val REPLY_TO_RE = Regex(REPLY_TO_PATTERN, RegexOption.IGNORE_CASE)
     private val QUOTE_RE = Regex("""\[quote(?:x)?\]([\s\S]*?)\[/quote(?:x)?\]""", RegexOption.IGNORE_CASE)
     private val PID_FLOOR_RE = Regex("""\[pid=\d+,tid=\d+(?:,reply=(\d+))?\]""")
     private val PID_BLOCK_RE = Regex("""\[pid=\d+,tid=\d+(?:,reply=\d+)?\](?:Reply)?\[/pid\]""")
@@ -84,7 +93,8 @@ object PostContentParser {
         RegexOption.IGNORE_CASE
     )
     private val COMBINED_RE = Regex(
-        """\[collapse(?:=[^\]]*)?\][\s\S]*?\[/collapse\]|""" +
+        REPLY_TO_PATTERN + "|" +
+            """\[collapse(?:=[^\]]*)?\][\s\S]*?\[/collapse\]|""" +
             """\[table(?:=[^\]]*)?\][\s\S]*?\[/table\]|""" +
             """\[quote(?:x)?\][\s\S]*?\[/quote(?:x)?\]|""" +
             """\[s:[^:\]]+:[^:\]]+\]|""" +
@@ -102,17 +112,27 @@ object PostContentParser {
 
     private const val IMG_MARK = "\u0001IMG\u0002"
 
-    fun parse(content: String, users: Map<String, String> = emptyMap()): List<PostBlock> {
+    fun parse(
+        content: String,
+        users: Map<String, String> = emptyMap(),
+        replyTargets: Map<String, PostReplyTarget> = emptyMap()
+    ): List<PostBlock> {
         var s = content
         // HTML <img> 归一为统一标记
         s = HTML_IMG_RE.replace(s) { m -> "$IMG_MARK${extractImgUrl(m.value)}$IMG_MARK" }
         // BBCode [img] 归一
         s = IMG_BB_RE.replace(s) { m -> "$IMG_MARK${m.groupValues[1].trim()}$IMG_MARK" }
         // 兜底：裸 IMG 标记里再统一
-        return parseInner(s, users, bold = false, strike = false)
+        return parseInner(s, users, replyTargets, bold = false, strike = false)
     }
 
-    private fun parseInner(input: String, users: Map<String, String>, bold: Boolean, strike: Boolean): List<PostBlock> {
+    private fun parseInner(
+        input: String,
+        users: Map<String, String>,
+        replyTargets: Map<String, PostReplyTarget>,
+        bold: Boolean,
+        strike: Boolean
+    ): List<PostBlock> {
         val out = mutableListOf<PostBlock>()
         var pos = 0
         for (m in COMBINED_RE.findAll(input)) {
@@ -121,9 +141,12 @@ object PostContentParser {
             }
             val v = m.value
             when {
-                v.startsWith("[collapse", ignoreCase = true) -> out += renderCollapse(v, users)
+                v.contains("Reply to", ignoreCase = true) ->
+                    renderReplyTo(v, users, replyTargets)?.let(out::add)
+                v.startsWith("[collapse", ignoreCase = true) ->
+                    out += renderCollapse(v, users, replyTargets)
                 v.startsWith("[table", ignoreCase = true) -> renderTable(v)?.let(out::add)
-                v.startsWith("[quote", ignoreCase = true) -> out += renderQuote(v, users)
+                v.startsWith("[quote", ignoreCase = true) -> out += renderQuote(v, users, replyTargets)
                 v.startsWith("[s:", ignoreCase = true) -> {
                     val sm = SMILE_RE.find(v)
                     if (sm != null) {
@@ -134,16 +157,16 @@ object PostContentParser {
                 }
                 v.startsWith("[b]", ignoreCase = true) -> {
                     val bm = BOLD_RE.find(v)
-                    if (bm != null) out += parseInner(bm.groupValues[1], users, true, strike)
+                    if (bm != null) out += parseInner(bm.groupValues[1], users, replyTargets, true, strike)
                 }
                 v.startsWith("[del]", ignoreCase = true) -> {
                     val dm = DEL_RE.find(v)
-                    if (dm != null) out += parseInner(dm.groupValues[1], users, bold, true)
+                    if (dm != null) out += parseInner(dm.groupValues[1], users, replyTargets, bold, true)
                 }
                 v.startsWith("[url", ignoreCase = true) -> {
                     val um = URL_RE.find(v) ?: URL_PLAIN_RE.find(v)
                     val inner = um?.groupValues?.getOrNull(um.groupValues.size - 1) ?: ""
-                    out += parseInner(inner, users, bold, strike)
+                    out += parseInner(inner, users, replyTargets, bold, strike)
                 }
                 v.startsWith("[flash", ignoreCase = true) -> {
                     val fm = FLASH_RE.find(v)
@@ -185,11 +208,11 @@ object PostContentParser {
                 v.startsWith("<br", ignoreCase = true) -> out += PostBlock.Text("\n", bold, strike)
                 v.startsWith("<b", ignoreCase = true) -> {
                     val bm = HTML_BOLD_RE.find(v)
-                    if (bm != null) out += parseInner(bm.groupValues[1], users, true, strike)
+                    if (bm != null) out += parseInner(bm.groupValues[1], users, replyTargets, true, strike)
                 }
                 v.startsWith("<i", ignoreCase = true) -> {
                     val im = HTML_ITALIC_RE.find(v)
-                    if (im != null) out += parseInner(im.groupValues[1], users, bold, strike)
+                    if (im != null) out += parseInner(im.groupValues[1], users, replyTargets, bold, strike)
                 }
             }
             pos = m.range.last + 1
@@ -198,13 +221,35 @@ object PostContentParser {
         return out
     }
 
-    private fun renderCollapse(collapse: String, users: Map<String, String>): PostBlock.Collapse {
+    private fun renderReplyTo(
+        reply: String,
+        users: Map<String, String>,
+        replyTargets: Map<String, PostReplyTarget>
+    ): PostBlock.ReplyTo? {
+        val match = REPLY_TO_RE.find(reply) ?: return null
+        val target = replyTargets[match.groupValues[1]]
+        val uid = match.groupValues[4]
+        val inlineName = decodeEntities(match.groupValues[5]).trim()
+        return PostBlock.ReplyTo(
+            refName = inlineName.ifEmpty { target?.refName ?: users[uid] ?: uid },
+            // pid 的第三个参数是页码，不是楼层；楼层只能由目标帖子的 PID 映射得到。
+            floor = target?.floor
+        )
+    }
+
+    private fun renderCollapse(
+        collapse: String,
+        users: Map<String, String>,
+        replyTargets: Map<String, PostReplyTarget>
+    ): PostBlock.Collapse {
         val match = COLLAPSE_RE.find(collapse)
             ?: return PostBlock.Collapse(title = null, blocks = emptyList())
         val title = decodeEntities(match.groupValues[1]).trim().ifEmpty { null }
         return PostBlock.Collapse(
             title = title,
-            blocks = parseInner(match.groupValues[2], users, bold = false, strike = false)
+            blocks = parseInner(
+                match.groupValues[2], users, replyTargets, bold = false, strike = false
+            )
         )
     }
 
@@ -236,7 +281,11 @@ object PostContentParser {
         return cleanText(text).trim()
     }
 
-    private fun renderQuote(quote: String, users: Map<String, String>): PostBlock.Quote {
+    private fun renderQuote(
+        quote: String,
+        users: Map<String, String>,
+        replyTargets: Map<String, PostReplyTarget>
+    ): PostBlock.Quote {
         val m = QUOTE_RE.find(quote) ?: return PostBlock.Quote(emptyList())
         val inner = m.groupValues[1]
         val floor = PID_FLOOR_RE.find(inner)?.groupValues?.getOrNull(1)?.toIntOrNull()
@@ -246,7 +295,11 @@ object PostContentParser {
             .replace(PID_BLOCK_RE, "")
             .replace(POSTBY_RE, "")
             .replace(META_TAG_RE, "")
-        return PostBlock.Quote(parseInner(b, users, bold = false, strike = false), name, floor)
+        return PostBlock.Quote(
+            parseInner(b, users, replyTargets, bold = false, strike = false),
+            name,
+            floor
+        )
     }
 
     /** 提取 <img> 标签里的真实地址（src / data-src / 协议相对 / 裸主机）。 */

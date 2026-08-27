@@ -105,4 +105,43 @@ class PostContentParserTest {
             collapse.blocks.filterIsInstance<PostBlock.Table>().single().rows
         )
     }
+
+    @Test
+    fun parsesStandaloneLegacyReplyHeader() {
+        val blocks = PostContentParser.parse(
+            """Reply to [pid=879834194,47452804,1]Reply[/pid] """ +
+                """Post by [uid=67309777]leecervel[/uid] (2026-08-27 20:43)""" +
+                """今年论坛还有不少人在说。""",
+            replyTargets = mapOf(
+                "879834194" to PostReplyTarget(refName = "leecervel", floor = 3)
+            )
+        )
+
+        val reply = blocks.filterIsInstance<PostBlock.ReplyTo>().single()
+        assertEquals("leecervel", reply.refName)
+        assertEquals(3, reply.floor)
+        assertTrue(blocks.filterIsInstance<PostBlock.Text>().any { it.text.contains("今年论坛") })
+    }
+
+    @Test
+    fun parsesBoldWrappedLegacyReplyHeader() {
+        val reply = PostContentParser.parse(
+            """[b]Reply to [pid=1,2,8]Reply[/pid] Post by [uid=42]Alice[/uid] (2026-08-27)[/b]正文""",
+            replyTargets = mapOf("1" to PostReplyTarget(refName = "Alice", floor = 8))
+        ).filterIsInstance<PostBlock.ReplyTo>().single()
+
+        assertEquals("Alice", reply.refName)
+        assertEquals(8, reply.floor)
+    }
+
+    @Test
+    fun doesNotTreatLegacyReplyPageNumberAsFloor() {
+        val reply = PostContentParser.parse(
+            """Reply to [pid=879834879,47452804,1]Reply[/pid] """ +
+                """Post by [uid=123]周期天王[/uid] (2026-08-27)正文"""
+        ).filterIsInstance<PostBlock.ReplyTo>().single()
+
+        assertEquals("周期天王", reply.refName)
+        assertEquals(null, reply.floor)
+    }
 }

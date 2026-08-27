@@ -169,7 +169,7 @@ class PostViewModel @Inject constructor(
             _page.value = next
             val merged = (cur.posts + result.posts).distinctBy { it.pid.ifBlank { "floor-${it.lou}" } }
             val users = cur.users + result.users
-            val newRenderData = prepareRenderData(result.posts, users)
+            val newRenderData = prepareRenderData(result.posts, users, merged)
             _uiState.value = PostUiState.Success(
                 merged,
                 next,
@@ -282,17 +282,23 @@ class PostViewModel @Inject constructor(
 
     private suspend fun prepareRenderData(
         posts: List<Post>,
-        users: Map<String, String>
+        users: Map<String, String>,
+        replyContext: List<Post> = posts
     ): Map<String, PostRenderData> = withContext(Dispatchers.Default) {
+        val replyTargets = replyContext
+            .filter { it.pid.isNotBlank() }
+            .associate { it.pid to PostReplyTarget(it.author, it.lou) }
         posts.associate { post ->
             post.renderKey() to PostRenderData(
-                body = PostContentParser.parse(post.content, users),
+                body = PostContentParser.parse(post.content, users, replyTargets),
                 signature = if (post.signature.isBlank()) {
                     emptyList()
                 } else {
-                    PostContentParser.parse(post.signature, users)
+                    PostContentParser.parse(post.signature, users, replyTargets)
                 },
-                comments = post.comments.map { PostContentParser.parse(it.content, users) }
+                comments = post.comments.map {
+                    PostContentParser.parse(it.content, users, replyTargets)
+                }
             )
         }
     }
