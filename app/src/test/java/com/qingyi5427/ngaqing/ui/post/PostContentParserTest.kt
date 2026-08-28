@@ -144,4 +144,32 @@ class PostContentParserTest {
         assertEquals("周期天王", reply.refName)
         assertEquals(null, reply.floor)
     }
+
+    @Test
+    fun parsesEscapedBareHttpsLink() {
+        val blocks = PostContentParser.parse("查看 https\\://example.com/path?q=1 然后继续")
+        val link = blocks.filterIsInstance<PostBlock.Link>().single()
+
+        assertEquals("https://example.com/path?q=1", link.url)
+        assertEquals(link.url, link.label)
+        assertTrue(blocks.filterIsInstance<PostBlock.Text>().any { it.text.contains("然后继续") })
+    }
+
+    @Test
+    fun parsesNamedAndPlainBbcodeLinks() {
+        val links = PostContentParser.parse(
+            """[url=https://example.com/a]示例页面[/url] [url]https://example.com/b[/url]"""
+        ).filterIsInstance<PostBlock.Link>()
+
+        assertEquals(PostBlock.Link("示例页面", "https://example.com/a"), links[0])
+        assertEquals(PostBlock.Link("https://example.com/b", "https://example.com/b"), links[1])
+    }
+
+    @Test
+    fun excludesSentencePunctuationFromBareLink() {
+        val blocks = PostContentParser.parse("地址：https://example.com/a。")
+
+        assertEquals("https://example.com/a", blocks.filterIsInstance<PostBlock.Link>().single().url)
+        assertEquals("。", blocks.filterIsInstance<PostBlock.Text>().last().text)
+    }
 }

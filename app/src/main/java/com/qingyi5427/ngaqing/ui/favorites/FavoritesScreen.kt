@@ -1,5 +1,7 @@
 package com.qingyi5427.ngaqing.ui.favorites
 
+import com.qingyi5427.ngaqing.ui.util.formatAuthorName
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -151,7 +153,7 @@ private fun FavoriteRow(item: FavoriteEntity, onOpen: () -> Unit) {
             )
             if (item.author.isNotBlank()) {
                 Text(
-                    item.author,
+                    formatAuthorName(item.author),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp)

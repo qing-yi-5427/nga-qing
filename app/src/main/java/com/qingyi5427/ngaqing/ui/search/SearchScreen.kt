@@ -40,6 +40,7 @@ import com.qingyi5427.ngaqing.ui.Routes
 import com.qingyi5427.ngaqing.ui.chrome.AppTopBar
 import com.qingyi5427.ngaqing.ui.gesture.SwipeBackContainer
 import com.qingyi5427.ngaqing.ui.util.formatRelative
+import com.qingyi5427.ngaqing.ui.util.formatAuthorName
 
 @Composable
 fun SearchScreen(
@@ -141,7 +142,7 @@ private fun SearchResultRow(item: ThreadItem, onClick: () -> Unit) {
         )
         Row(Modifier.padding(top = 6.dp)) {
             Text(
-                item.forumName.ifBlank { item.author },
+                item.forumName.ifBlank { formatAuthorName(item.author) },
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary
             )

@@ -9,6 +9,7 @@ import com.qingyi5427.ngaqing.data.remote.NgaResourceUrls
 @Immutable
 sealed interface PostBlock {
     data class Text(val text: String, val bold: Boolean = false, val strike: Boolean = false) : PostBlock
+    data class Link(val label: String, val url: String) : PostBlock
     data class Img(val url: String, val emote: Boolean = false) : PostBlock
     data class Media(val url: String, val kind: MediaKind) : PostBlock
     data class Table(val rows: List<List<String>>) : PostBlock
@@ -100,6 +101,7 @@ object PostContentParser {
             """\[s:[^:\]]+:[^:\]]+\]|""" +
             """\[b\][\s\S]*?\[/b\]|\[del\][\s\S]*?\[/del\]|""" +
             """\[url(?:=[^\]]*)?\][\s\S]*?\[/url\]|""" +
+            """https?://[^\s\[\]<>\"']+|""" +
             """\[flash(?:=(?:video|audio))?\][\s\S]*?\[/flash\]|""" +
             """\u0001IMG\u0002[\s\S]*?\u0001IMG\u0002|""" +
             """<br\s*/?>|<b\b[^>]*>[\s\S]*?</b\s*>|<i\b[^>]*>[\s\S]*?</i\s*>""",
@@ -118,6 +120,8 @@ object PostContentParser {
         replyTargets: Map<String, PostReplyTarget> = emptyMap()
     ): List<PostBlock> {
         var s = content
+            .replace(Regex("""(?i)\b(https?)\\://"""), "$1://")
+            .replace(Regex("""(?i)\b(https?):\\/\\/"""), "$1://")
         // HTML <img> 归一为统一标记
         s = HTML_IMG_RE.replace(s) { m -> "$IMG_MARK${extractImgUrl(m.value)}$IMG_MARK" }
         // BBCode [img] 归一
@@ -164,10 +168,19 @@ object PostContentParser {
                     if (dm != null) out += parseInner(dm.groupValues[1], users, replyTargets, bold, true)
                 }
                 v.startsWith("[url", ignoreCase = true) -> {
-                    val um = URL_RE.find(v) ?: URL_PLAIN_RE.find(v)
-                    val inner = um?.groupValues?.getOrNull(um.groupValues.size - 1) ?: ""
-                    out += parseInner(inner, users, replyTargets, bold, strike)
+                    val assigned = URL_RE.find(v)
+                    val plain = if (assigned == null) URL_PLAIN_RE.find(v) else null
+                    val rawUrl = assigned?.groupValues?.get(1) ?: plain?.groupValues?.get(1).orEmpty()
+                    val url = normalizeLinkUrl(rawUrl)
+                    val label = cleanText(assigned?.groupValues?.get(2) ?: rawUrl).ifBlank { url }
+                    if (url.isNotEmpty()) {
+                        out += PostBlock.Link(label, url)
+                    } else {
+                        out += PostBlock.Text(label, bold, strike)
+                    }
                 }
+                v.startsWith("http://", ignoreCase = true) ||
+                    v.startsWith("https://", ignoreCase = true) -> renderBareLink(v, bold, strike, out)
                 v.startsWith("[flash", ignoreCase = true) -> {
                     val fm = FLASH_RE.find(v)
                     if (fm != null) {
@@ -219,6 +232,27 @@ object PostContentParser {
         }
         if (pos < input.length) out += PostBlock.Text(cleanText(input.substring(pos)), bold, strike)
         return out
+    }
+
+    private fun renderBareLink(
+        raw: String,
+        bold: Boolean,
+        strike: Boolean,
+        out: MutableList<PostBlock>
+    ) {
+        val urlText = raw.trimEnd('.', ',', ';', '!', '?', ')', ']', '}', '，', '。', '；', '！', '？', '）', '】')
+        val suffix = raw.substring(urlText.length)
+        val url = normalizeLinkUrl(urlText)
+        if (url.isNotEmpty()) out += PostBlock.Link(url, url)
+        else out += PostBlock.Text(urlText, bold, strike)
+        if (suffix.isNotEmpty()) out += PostBlock.Text(suffix, bold, strike)
+    }
+
+    private fun normalizeLinkUrl(raw: String): String {
+        val url = decodeEntities(raw).trim().replace("\\:", ":").replace("\\/", "/")
+        return url.takeIf {
+            it.startsWith("https://", ignoreCase = true) || it.startsWith("http://", ignoreCase = true)
+        }.orEmpty()
     }
 
     private fun renderReplyTo(

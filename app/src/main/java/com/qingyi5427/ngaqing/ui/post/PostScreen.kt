@@ -115,6 +115,7 @@ import com.qingyi5427.ngaqing.data.local.NgaDomains
 import com.qingyi5427.ngaqing.data.remote.NgaInterceptor
 import com.qingyi5427.ngaqing.ui.theme.LocalGlassPalette
 import com.qingyi5427.ngaqing.ui.gesture.SwipeBackContainer
+import com.qingyi5427.ngaqing.ui.util.formatAuthorName
 import com.qingyi5427.ngaqing.ui.util.formatRelative
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -752,7 +753,7 @@ private fun PostCard(
             Column(Modifier.padding(start = 10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        post.author.ifBlank { "匿名" },
+                        formatAuthorName(post.author),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
@@ -814,7 +815,7 @@ private fun PostCard(
                 ) {
                     post.comments.forEachIndexed { index, comment ->
                         Text(
-                            comment.author.ifBlank { "匿名" },
+                            formatAuthorName(comment.author),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary
                         )
@@ -892,6 +893,26 @@ private fun RenderBlock(
                 fontWeight = if (block.bold) FontWeight.Bold else FontWeight.Normal,
                 textDecoration = if (block.strike) TextDecoration.LineThrough else TextDecoration.None,
                 color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+        is PostBlock.Link -> {
+            val context = LocalContext.current
+            Text(
+                text = block.label,
+                modifier = Modifier.clickable {
+                    runCatching {
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse(block.url)).apply {
+                                addCategory(Intent.CATEGORY_BROWSABLE)
+                            }
+                        )
+                    }.onFailure {
+                        Toast.makeText(context, "找不到可打开链接的应用", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.primary,
+                textDecoration = TextDecoration.Underline
             )
         }
         is PostBlock.Img -> {
@@ -1157,7 +1178,7 @@ private fun RenderBlock(
                     )
                     Spacer(Modifier.width(7.dp))
                     Text(
-                        "回复 @${block.refName}",
+                        "回复 @${formatAuthorName(block.refName)}",
                         modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.primary

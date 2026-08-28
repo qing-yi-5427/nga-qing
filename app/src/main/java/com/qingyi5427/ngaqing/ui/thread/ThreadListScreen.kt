@@ -64,6 +64,7 @@ import com.qingyi5427.ngaqing.ui.root.RootViewModel
 import com.qingyi5427.ngaqing.ui.theme.LocalGlassPalette
 import com.qingyi5427.ngaqing.ui.gesture.SwipeBackContainer
 import com.qingyi5427.ngaqing.ui.util.formatRelative
+import com.qingyi5427.ngaqing.ui.util.formatAuthorName
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChanged
 
@@ -351,7 +352,7 @@ private fun ThreadRow(item: ThreadItem, isVisited: Boolean, onClick: () -> Unit)
         }
         Row(Modifier.padding(top = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                item.author.ifBlank { "匿名" },
+                formatAuthorName(item.author),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
                 maxLines = 1
