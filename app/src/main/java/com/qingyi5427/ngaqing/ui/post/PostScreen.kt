@@ -290,6 +290,14 @@ fun PostScreen(
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(
+                            text = { Text(if (onlyAuthor) "查看全部回复" else "只看楼主") },
+                            leadingIcon = { Icon(Icons.Filled.PersonSearch, null) },
+                            onClick = {
+                                menuOpen = false
+                                viewModel.toggleOnlyAuthor()
+                            }
+                        )
+                        DropdownMenuItem(
                             text = { Text("跳转楼层") },
                             leadingIcon = { Icon(Icons.Filled.SwapVert, null) },
                             onClick = {
@@ -656,7 +664,7 @@ private fun PostQuickActions(
                     modifier = Modifier.padding(bottom = 10.dp)
                 ) {
                     QuickActionChip(
-                        label = if (onlyAuthor) "查看全部回复" else "只看作者",
+                        label = if (onlyAuthor) "查看全部回复" else "只看楼主",
                         onClick = onOnlyAuthor
                     ) {
                         Icon(Icons.Filled.PersonSearch, contentDescription = null, Modifier.size(18.dp))
