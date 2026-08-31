@@ -9,6 +9,7 @@ import com.qingyi5427.ngaqing.data.remote.NgaResourceUrls
 @Immutable
 sealed interface PostBlock {
     data class Text(val text: String, val bold: Boolean = false, val strike: Boolean = false) : PostBlock
+    data class Code(val text: String) : PostBlock
     data class Link(val label: String, val url: String) : PostBlock
     data class Img(val url: String, val emote: Boolean = false) : PostBlock
     data class Media(val url: String, val kind: MediaKind) : PostBlock
@@ -68,6 +69,10 @@ object PostContentParser {
         """\[flash(?:=(video|audio))?\]([\s\S]*?)\[/flash\]""",
         RegexOption.IGNORE_CASE
     )
+    private val CODE_RE = Regex(
+        """\[code(?:=[^\]]*)?\]([\s\S]*?)\[/code\]""",
+        RegexOption.IGNORE_CASE
+    )
     private val TABLE_RE = Regex(
         """\[table(?:=[^\]]*)?\]([\s\S]*?)\[/table\]""",
         RegexOption.IGNORE_CASE
@@ -96,6 +101,7 @@ object PostContentParser {
     private val COMBINED_RE = Regex(
         REPLY_TO_PATTERN + "|" +
             """\[collapse(?:=[^\]]*)?\][\s\S]*?\[/collapse\]|""" +
+            """\[code(?:=[^\]]*)?\][\s\S]*?\[/code\]|""" +
             """\[table(?:=[^\]]*)?\][\s\S]*?\[/table\]|""" +
             """\[quote(?:x)?\][\s\S]*?\[/quote(?:x)?\]|""" +
             """\[s:[^:\]]+:[^:\]]+\]|""" +
@@ -122,6 +128,8 @@ object PostContentParser {
         var s = content
             .replace(Regex("""(?i)\b(https?)\\://"""), "$1://")
             .replace(Regex("""(?i)\b(https?):\\/\\/"""), "$1://")
+            .replace(Regex("""\[\*\]""", RegexOption.IGNORE_CASE), "\n• ")
+            .replace(Regex("""\[/?list(?:=[^\]]*)?\]""", RegexOption.IGNORE_CASE), "")
         // HTML <img> 归一为统一标记
         s = HTML_IMG_RE.replace(s) { m -> "$IMG_MARK${extractImgUrl(m.value)}$IMG_MARK" }
         // BBCode [img] 归一
@@ -149,6 +157,11 @@ object PostContentParser {
                     renderReplyTo(v, users, replyTargets)?.let(out::add)
                 v.startsWith("[collapse", ignoreCase = true) ->
                     out += renderCollapse(v, users, replyTargets)
+                v.startsWith("[code", ignoreCase = true) -> {
+                    CODE_RE.find(v)?.groupValues?.getOrNull(1)?.let { code ->
+                        out += PostBlock.Code(decodeEntities(code).trim('\n', '\r'))
+                    }
+                }
                 v.startsWith("[table", ignoreCase = true) -> renderTable(v)?.let(out::add)
                 v.startsWith("[quote", ignoreCase = true) -> out += renderQuote(v, users, replyTargets)
                 v.startsWith("[s:", ignoreCase = true) -> {

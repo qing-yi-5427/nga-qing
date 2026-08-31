@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -160,6 +161,16 @@ fun ThreadListScreen(
                         }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                             DropdownMenuItem(
+                                text = { Text("发布新主题") },
+                                leadingIcon = { Icon(Icons.Filled.Edit, null) },
+                                onClick = {
+                                    menuOpen = false
+                                    nav.navigate(
+                                        Routes.newTopicRoute(viewModel.fid, viewModel.name, viewModel.stid)
+                                    )
+                                }
+                            )
+                            DropdownMenuItem(
                                 text = { Text("按最后回复排序") },
                                 leadingIcon = {
                                     if (sort == ThreadSort.LAST_REPLY) Icon(Icons.Filled.Check, null)
@@ -238,6 +249,18 @@ fun ThreadListScreen(
                                 state = listState,
                                 contentPadding = PaddingValues(vertical = 4.dp)
                             ) {
+                                if (current.fromCache) {
+                                    item(key = "offline-banner", contentType = "offline-banner") {
+                                        Text(
+                                            "当前显示离线缓存 · 下拉刷新可重试",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                            modifier = Modifier.fillMaxWidth()
+                                                .background(MaterialTheme.colorScheme.secondaryContainer)
+                                                .padding(horizontal = 16.dp, vertical = 10.dp)
+                                        )
+                                    }
+                                }
                                 items(filtered, key = { it.tid }, contentType = { "thread-row" }) { thread ->
                                     ThreadRow(thread, isVisited = thread.tid in visitedTids) {
                                         viewModel.saveScrollPosition(

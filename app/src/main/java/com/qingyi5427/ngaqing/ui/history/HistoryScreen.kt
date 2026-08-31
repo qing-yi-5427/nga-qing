@@ -16,8 +16,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -53,6 +58,9 @@ import com.qingyi5427.ngaqing.ui.util.formatAuthorName
 fun HistoryScreen(nav: NavHostController, viewModel: HistoryViewModel = hiltViewModel()) {
     val history by viewModel.history.collectAsStateWithLifecycle()
     var confirmClear by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+    var sortMenu by remember { mutableStateOf(false) }
+    var selectedSort by remember { mutableStateOf(HistorySort.RECENT) }
 
     SwipeBackContainer(onBack = { nav.popBackStack() }) {
         Column(Modifier.fillMaxSize()) {
@@ -69,7 +77,36 @@ fun HistoryScreen(nav: NavHostController, viewModel: HistoryViewModel = hiltView
                             Icon(Icons.Filled.DeleteSweep, contentDescription = "清空历史")
                         }
                     }
+                    Box {
+                        IconButton(onClick = { sortMenu = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "排序")
+                        }
+                        DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
+                            listOf(
+                                HistorySort.RECENT to "按浏览时间",
+                                HistorySort.TITLE to "按标题",
+                                HistorySort.AUTHOR to "按作者"
+                            ).forEach { (sort, label) ->
+                                DropdownMenuItem(text = { Text(label) }, onClick = {
+                                    selectedSort = sort
+                                    viewModel.setSort(sort)
+                                    sortMenu = false
+                                })
+                            }
+                        }
+                    }
                 }
+            )
+            OutlinedTextField(
+                value = query,
+                onValueChange = {
+                    query = it
+                    viewModel.setQuery(it)
+                },
+                leadingIcon = { Icon(Icons.Filled.Search, null) },
+                placeholder = { Text("搜索浏览历史") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp)
             )
             if (history.isEmpty()) {
                 Column(
@@ -92,7 +129,21 @@ fun HistoryScreen(nav: NavHostController, viewModel: HistoryViewModel = hiltView
                 }
             } else {
                 LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 6.dp)) {
-                    items(history, key = { it.tid }, contentType = { "history-row" }) { item ->
+                    val groups = if (selectedSort == HistorySort.RECENT) {
+                        history.groupBy { historyGroup(it.lastVisited) }
+                    } else {
+                        linkedMapOf("全部记录" to history)
+                    }
+                    groups.forEach { (label, groupItems) ->
+                        item(key = "header:$label", contentType = "history-header") {
+                            Text(
+                                label,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)
+                            )
+                        }
+                    items(groupItems, key = { it.tid }, contentType = { "history-row" }) { item ->
                         val dismiss = rememberSwipeToDismissBoxState(
                             confirmValueChange = { value ->
                                 if (value == SwipeToDismissBoxValue.EndToStart) {
@@ -122,6 +173,7 @@ fun HistoryScreen(nav: NavHostController, viewModel: HistoryViewModel = hiltView
                             modifier = Modifier.padding(start = 20.dp)
                         )
                     }
+                    }
                 }
             }
         }
@@ -140,6 +192,20 @@ fun HistoryScreen(nav: NavHostController, viewModel: HistoryViewModel = hiltView
             },
             dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("取消") } }
         )
+    }
+}
+
+private fun historyGroup(timestamp: Long): String {
+    val now = java.util.Calendar.getInstance()
+    val date = java.util.Calendar.getInstance().apply { timeInMillis = timestamp }
+    val dayDiff = ((now.timeInMillis - date.timeInMillis) / 86_400_000L).toInt()
+    return when {
+        now.get(java.util.Calendar.YEAR) == date.get(java.util.Calendar.YEAR) &&
+            now.get(java.util.Calendar.DAY_OF_YEAR) == date.get(java.util.Calendar.DAY_OF_YEAR) -> "今天"
+        dayDiff <= 1 -> "昨天"
+        now.get(java.util.Calendar.YEAR) == date.get(java.util.Calendar.YEAR) ->
+            "${date.get(java.util.Calendar.MONTH) + 1}月"
+        else -> "${date.get(java.util.Calendar.YEAR)}年${date.get(java.util.Calendar.MONTH) + 1}月"
     }
 }
 

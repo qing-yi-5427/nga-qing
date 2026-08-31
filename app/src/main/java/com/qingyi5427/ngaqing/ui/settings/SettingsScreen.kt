@@ -46,6 +46,11 @@ fun SettingsScreen(nav: NavHostController, viewModel: SettingsViewModel = hiltVi
     val ngaDomain by viewModel.ngaDomain.collectAsStateWithLifecycle()
     val blockedUsers by viewModel.blacklistUsers.collectAsStateWithLifecycle()
     val blockedKeywords by viewModel.blacklistKeywords.collectAsStateWithLifecycle()
+    val readingTextScale by viewModel.readingTextScale.collectAsStateWithLifecycle()
+    val readingLineSpacing by viewModel.readingLineSpacing.collectAsStateWithLifecycle()
+    val showSignatures by viewModel.showSignatures.collectAsStateWithLifecycle()
+    val accounts by viewModel.accounts.collectAsStateWithLifecycle()
+    val activeUid by viewModel.activeUid.collectAsStateWithLifecycle()
     var userInput by remember { mutableStateOf("") }
     var keywordInput by remember { mutableStateOf("") }
     var confirmLogout by remember { mutableStateOf(false) }
@@ -76,6 +81,67 @@ fun SettingsScreen(nav: NavHostController, viewModel: SettingsViewModel = hiltVi
                             )
                         }
                     }
+                }
+            }
+            item {
+                SettingSection("阅读") {
+                    Text("正文字号", style = MaterialTheme.typography.bodyMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(0.9f to "小", 1f to "标准", 1.15f to "大", 1.3f to "特大").forEach { (value, label) ->
+                            FilterChip(
+                                selected = kotlin.math.abs(readingTextScale - value) < 0.01f,
+                                onClick = { viewModel.setReadingTextScale(value) },
+                                label = { Text(label) }
+                            )
+                        }
+                    }
+                    Text("行距", style = MaterialTheme.typography.bodyMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(0.9f to "紧凑", 1f to "标准", 1.18f to "宽松").forEach { (value, label) ->
+                            FilterChip(
+                                selected = kotlin.math.abs(readingLineSpacing - value) < 0.01f,
+                                onClick = { viewModel.setReadingLineSpacing(value) },
+                                label = { Text(label) }
+                            )
+                        }
+                    }
+                    FilterChip(
+                        selected = showSignatures,
+                        onClick = { viewModel.setShowSignatures(!showSignatures) },
+                        label = { Text(if (showSignatures) "显示用户签名" else "隐藏用户签名") }
+                    )
+                }
+            }
+            item {
+                SettingSection("账号") {
+                    if (accounts.size <= 1) {
+                        Text(
+                            "再次登录其他账号后，可在这里快速切换。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    accounts.forEach { account ->
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clickable { viewModel.switchAccount(account.uid) }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = account.uid == activeUid,
+                                onClick = { viewModel.switchAccount(account.uid) }
+                            )
+                            Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                                Text(account.username.ifBlank { "NGA 用户" })
+                                Text("UID ${account.uid}", style = MaterialTheme.typography.bodySmall)
+                            }
+                            IconButton(onClick = { viewModel.removeAccount(account.uid) }) {
+                                Icon(Icons.Filled.DeleteOutline, contentDescription = "移除账号 ${account.username}")
+                            }
+                        }
+                    }
+                    TextButton(onClick = { nav.navigate(Routes.ADD_ACCOUNT) }) { Text("添加账号") }
                 }
             }
             item {
@@ -147,6 +213,18 @@ fun SettingsScreen(nav: NavHostController, viewModel: SettingsViewModel = hiltVi
                     )
                     blockedKeywords.forEach { value ->
                         RemovableSetting(value) { viewModel.removeBlacklistKeyword(value) }
+                    }
+                }
+            }
+            item {
+                SettingSection("存储") {
+                    Text(
+                        "主题列表、帖子和搜索结果会保留 14 天，在网络不可用时自动显示。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    TextButton(onClick = viewModel::clearOfflineCache) {
+                        Text("清理离线缓存")
                     }
                 }
             }

@@ -2,6 +2,8 @@ package com.qingyi5427.ngaqing.ui.favorites
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -14,8 +16,15 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -24,14 +33,17 @@ import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -46,9 +58,72 @@ import com.qingyi5427.ngaqing.ui.util.formatAuthorName
 @Composable
 fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hiltViewModel()) {
     val favorites by viewModel.favorites.collectAsStateWithLifecycle()
+    val folders by viewModel.folders.collectAsStateWithLifecycle()
+    val syncing by viewModel.syncing.collectAsStateWithLifecycle()
+    val syncMessage by viewModel.syncMessage.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     var pendingDelete by remember { mutableStateOf<FavoriteEntity?>(null) }
+    var pendingMove by remember { mutableStateOf<FavoriteEntity?>(null) }
+    var folderInput by remember { mutableStateOf("") }
+    var query by remember { mutableStateOf("") }
+    var selectedFolder by remember { mutableStateOf<String?>(null) }
+    var sortMenu by remember { mutableStateOf(false) }
+    LaunchedEffect(syncMessage) {
+        syncMessage?.let {
+            android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show()
+            viewModel.consumeSyncMessage()
+        }
+    }
     Column(Modifier.fillMaxSize()) {
-        AppTopBar("收藏")
+        AppTopBar("收藏", actions = {
+            IconButton(onClick = viewModel::syncFromServer, enabled = !syncing) {
+                if (syncing) CircularProgressIndicator(Modifier.padding(10.dp), strokeWidth = 2.dp)
+                else Icon(Icons.Filled.Sync, contentDescription = "与 NGA 收藏同步")
+            }
+            Box {
+                IconButton(onClick = { sortMenu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "排序") }
+                DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
+                    listOf(
+                        FavoriteSort.NEWEST to "按收藏时间",
+                        FavoriteSort.TITLE to "按标题",
+                        FavoriteSort.AUTHOR to "按作者"
+                    ).forEach { (sort, label) ->
+                        DropdownMenuItem(text = { Text(label) }, onClick = {
+                            sortMenu = false
+                            viewModel.setSort(sort)
+                        })
+                    }
+                }
+            }
+        })
+        OutlinedTextField(
+            value = query,
+            onValueChange = {
+                query = it
+                viewModel.setQuery(it)
+            },
+            leadingIcon = { Icon(Icons.Filled.Search, null) },
+            placeholder = { Text("搜索收藏") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp)
+        )
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                .padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            (listOf<String?>(null) + folders).forEach { folder ->
+                FilterChip(
+                    selected = selectedFolder == folder,
+                    onClick = {
+                        selectedFolder = folder
+                        viewModel.setFolder(folder)
+                    },
+                    label = { Text(folder ?: "全部") },
+                    modifier = Modifier.padding(end = 8.dp)
+                )
+            }
+        }
         Box(Modifier.weight(1f)) {
             if (favorites.isEmpty()) {
                 Column(
@@ -79,7 +154,11 @@ fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hilt
                         SwipeToDeleteFavorite(
                             favorite,
                             onOpen = { nav.navigate(Routes.postRoute(favorite.tid)) },
-                            onDelete = { pendingDelete = favorite }
+                            onDelete = { pendingDelete = favorite },
+                            onMove = {
+                                pendingMove = favorite
+                                folderInput = favorite.folder
+                            }
                         )
                         HorizontalDivider(
                             color = MaterialTheme.colorScheme.outlineVariant,
@@ -118,6 +197,28 @@ fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hilt
             }
         )
     }
+
+    pendingMove?.let { favorite ->
+        AlertDialog(
+            onDismissRequest = { pendingMove = null },
+            title = { Text("移动收藏") },
+            text = {
+                OutlinedTextField(
+                    value = folderInput,
+                    onValueChange = { folderInput = it },
+                    label = { Text("分组名称") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.move(favorite.tid, folderInput)
+                    pendingMove = null
+                }) { Text("移动") }
+            },
+            dismissButton = { TextButton(onClick = { pendingMove = null }) { Text("取消") } }
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -125,7 +226,8 @@ fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hilt
 private fun SwipeToDeleteFavorite(
     item: FavoriteEntity,
     onOpen: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onMove: () -> Unit
 ) {
     val state = rememberSwipeToDismissBoxState(
         confirmValueChange = { target ->
@@ -164,12 +266,12 @@ private fun SwipeToDeleteFavorite(
             }
         }
     ) {
-        FavoriteRow(item, onOpen, onDelete)
+        FavoriteRow(item, onOpen, onDelete, onMove)
     }
 }
 
 @Composable
-private fun FavoriteRow(item: FavoriteEntity, onOpen: () -> Unit, onDelete: () -> Unit) {
+private fun FavoriteRow(item: FavoriteEntity, onOpen: () -> Unit, onDelete: () -> Unit, onMove: () -> Unit) {
     Row(
         Modifier.fillMaxWidth()
             .background(MaterialTheme.colorScheme.background)
@@ -191,6 +293,9 @@ private fun FavoriteRow(item: FavoriteEntity, onOpen: () -> Unit, onDelete: () -
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp)
                 )
+            }
+            TextButton(onClick = onMove) {
+                Text(item.folder, style = MaterialTheme.typography.labelMedium)
             }
         }
         IconButton(onClick = onDelete) {

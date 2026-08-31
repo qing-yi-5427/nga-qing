@@ -24,6 +24,7 @@ sealed interface ThreadUiState {
         val page: Int,           // 当前已加载到的最后一页
         val totalPages: Int,
         val recommendedOnly: Boolean,
+        val fromCache: Boolean = false,
         val isLoadingMore: Boolean = false,  // 是否正在加载下一页
         val loadError: String? = null        // 加载下一页时的瞬时错误
     ) : ThreadUiState
@@ -132,6 +133,7 @@ class ThreadListViewModel @Inject constructor(
                 page = page,
                 totalPages = tp,
                 recommendedOnly = _recommendedOnly.value,
+                fromCache = result.fromCache,
                 isLoadingMore = false,
                 loadError = null
             )

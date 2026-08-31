@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.qingyi5427.ngaqing.data.model.Post
 import com.qingyi5427.ngaqing.data.local.NgaDomains
 import com.qingyi5427.ngaqing.data.local.UserPreferences
+import com.qingyi5427.ngaqing.data.local.DraftEntity
 import com.qingyi5427.ngaqing.data.remote.LoginHelper
 import com.qingyi5427.ngaqing.data.repository.NgaRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -25,11 +26,19 @@ sealed interface PostUiState {
         val posts: List<Post>,
         val page: Int,
         val totalPages: Int,
+        val fromCache: Boolean = false,
         val users: Map<String, String> = emptyMap(),
         val renderData: Map<String, PostRenderData> = emptyMap()
     ) : PostUiState
     data class Error(val raw: String, val msg: String) : PostUiState
 }
+
+data class ReplyTarget(
+    val pid: String,
+    val author: String,
+    val floor: Int,
+    val quote: Boolean
+)
 
 @HiltViewModel
 class PostViewModel @Inject constructor(
@@ -67,6 +76,12 @@ class PostViewModel @Inject constructor(
 
     private val _replyResult = MutableStateFlow<String?>(null)
     val replyResult: StateFlow<String?> = _replyResult.asStateFlow()
+    private val _replyTarget = MutableStateFlow<ReplyTarget?>(null)
+    val replyTarget: StateFlow<ReplyTarget?> = _replyTarget.asStateFlow()
+    private val _draftContent = MutableStateFlow("")
+    val draftContent: StateFlow<String> = _draftContent.asStateFlow()
+    private val _watching = MutableStateFlow(false)
+    val watching: StateFlow<Boolean> = _watching.asStateFlow()
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
     private val _targetFloor = MutableStateFlow<Int?>(null)
@@ -86,6 +101,18 @@ class PostViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             _favorite.value = repo.isFavorite(tid)
+            _watching.value = repo.isWatching(tid)
+            repo.draft(draftKey)?.let { draft ->
+                _draftContent.value = draft.content
+                if (draft.targetPid.isNotBlank()) {
+                    _replyTarget.value = ReplyTarget(
+                        draft.targetPid,
+                        draft.targetAuthor,
+                        floor = draft.targetFloor,
+                        quote = draft.kind == "quote"
+                    )
+                }
+            }
             val history = repo.history(tid)
             _subject.value = history?.title.orEmpty()
             val savedFloor = history?.lastFloor?.takeIf { it > 0 }
@@ -126,6 +153,7 @@ class PostViewModel @Inject constructor(
                 result.posts,
                 p,
                 _totalPages.value,
+                result.fromCache,
                 result.users,
                 renderData
             )
@@ -174,6 +202,7 @@ class PostViewModel @Inject constructor(
                 merged,
                 next,
                 _totalPages.value,
+                cur.fromCache || result.fromCache,
                 users,
                 cur.renderData + newRenderData
             )
@@ -183,7 +212,7 @@ class PostViewModel @Inject constructor(
 
     fun retryMore() = loadMore()
 
-    /** 发表回复。fid 从帖子第一楼数据里取，成功后提示并刷新当前页。 */
+    /** 发表回复；有目标楼层时使用 NGA 标准 reply/quote 参数。 */
     fun reply(content: String) {
         if (_replying.value) return
         val cur = _uiState.value as? PostUiState.Success ?: return
@@ -199,10 +228,20 @@ class PostViewModel @Inject constructor(
         _replying.value = true
         _replyResult.value = null
         viewModelScope.launch {
-            val r = repo.reply(fid, tid, text)
+            val target = _replyTarget.value
+            val r = repo.publish(
+                action = if (target?.quote == true) "quote" else "reply",
+                fid = fid,
+                tid = tid,
+                pid = target?.pid ?: "0",
+                content = text
+            )
             _replying.value = false
             val success = r.getOrNull()
             if (success != null) {
+                repo.deleteDraft(draftKey)
+                _draftContent.value = ""
+                _replyTarget.value = null
                 refreshTailAfterReply()
                 _replyResult.value = success
             } else {
@@ -230,6 +269,7 @@ class PostViewModel @Inject constructor(
             result.posts,
             target,
             newestTotal,
+            result.fromCache,
             result.users,
             renderData
         )
@@ -237,6 +277,56 @@ class PostViewModel @Inject constructor(
 
     fun consumeReplyResult() {
         _replyResult.value = null
+    }
+
+    fun setReplyTarget(post: Post?, quote: Boolean = false) {
+        _replyTarget.value = post?.let { ReplyTarget(it.pid, it.author, it.lou, quote) }
+    }
+
+    fun saveDraft(content: String) {
+        _draftContent.value = content
+        val target = _replyTarget.value
+        viewModelScope.launch {
+            if (content.isBlank()) {
+                repo.deleteDraft(draftKey)
+            } else {
+                repo.saveDraft(
+                    DraftEntity(
+                        key = draftKey,
+                        kind = if (target?.quote == true) "quote" else "reply",
+                        tid = tid,
+                        fid = threadFid,
+                        targetPid = target?.pid.orEmpty(),
+                        targetAuthor = target?.author.orEmpty(),
+                        targetFloor = target?.floor ?: 0,
+                        content = content
+                    )
+                )
+            }
+        }
+    }
+
+    fun discardDraft() {
+        _draftContent.value = ""
+        _replyTarget.value = null
+        viewModelScope.launch { repo.deleteDraft(draftKey) }
+    }
+
+    fun toggleWatching() {
+        viewModelScope.launch {
+            if (_watching.value) {
+                repo.unwatchThread(tid)
+                _watching.value = false
+            } else {
+                repo.watchThread(
+                    tid = tid,
+                    title = _subject.value,
+                    fid = threadFid,
+                    replies = (_totalRows.value - 1).coerceAtLeast(0)
+                )
+                _watching.value = true
+            }
+        }
     }
 
     fun jumpToFloor(floor: Int) {
@@ -302,6 +392,8 @@ class PostViewModel @Inject constructor(
             )
         }
     }
+
+    private val draftKey: String get() = "reply:$tid"
 }
 
 internal fun Post.renderKey(): String = pid.ifBlank { "floor-$lou" }

@@ -31,6 +31,13 @@ object NgaDomains {
     /** 只有论坛入口域名可以互换；img.nga.cn 等附件/CDN 域名必须保留原主机。 */
     fun isForumHost(host: String): Boolean = options.any { it.host == host.lowercase(Locale.ROOT) }
 
+    /** 只用于幂等读取请求；写操作不得自动重试，避免重复发帖或重复收藏。 */
+    fun failoverHosts(preferred: String?): List<String> {
+        val selected = normalizeHost(preferred)
+        val stable = listOf(DEFAULT_HOST, "ngabbs.com", "nga.178.com")
+        return (listOf(selected) + stable).distinct()
+    }
+
     fun origin(host: String?): String = "https://${normalizeHost(host)}"
 
     fun url(host: String?, path: String = ""): String =

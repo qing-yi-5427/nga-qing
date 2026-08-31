@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import okhttp3.Interceptor
 import okhttp3.Response
+import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -19,26 +20,52 @@ class NgaInterceptor @Inject constructor(
         val uid = runBlocking { prefs.uid.first() }
         val cid = runBlocking { prefs.cid.first() }
         val host = runBlocking { prefs.ngaDomain.first() }
-        val selectedUrl = if (NgaDomains.isForumHost(request.url.host)) {
-            request.url.newBuilder()
-                .scheme("https")
-                .host(NgaDomains.normalizeHost(host))
-                .port(443)
-                .build()
-        } else {
-            request.url
+        if (!NgaDomains.isForumHost(request.url.host)) {
+            return chain.proceed(authenticatedRequest(request, request.url.host, uid, cid))
         }
 
-        val builder = request.newBuilder()
+        val isSafeRead = request.method == "GET" || request.method == "HEAD"
+        val candidates = if (isSafeRead) {
+            NgaDomains.failoverHosts(host)
+        } else {
+            listOf(NgaDomains.normalizeHost(host))
+        }
+        var lastFailure: IOException? = null
+        candidates.forEachIndexed { index, candidate ->
+            val attempt = authenticatedRequest(request, candidate, uid, cid)
+            try {
+                val response = chain.proceed(attempt)
+                val retryServerFailure = response.code in 500..599 && index < candidates.lastIndex
+                if (!retryServerFailure) return response
+                response.close()
+            } catch (error: IOException) {
+                lastFailure = error
+                if (index == candidates.lastIndex) throw error
+            }
+        }
+        throw lastFailure ?: IOException("所有 NGA 入口域名均不可用")
+    }
+
+    private fun authenticatedRequest(
+        source: okhttp3.Request,
+        host: String,
+        uid: String,
+        cid: String
+    ): okhttp3.Request {
+        val selectedUrl = if (NgaDomains.isForumHost(source.url.host)) {
+            source.url.newBuilder().scheme("https").host(host).port(443).build()
+        } else {
+            source.url
+        }
+        val builder = source.newBuilder()
             .url(selectedUrl)
             .header("User-Agent", UA)
             .header("X-User-Agent", CLIENT_ID)
             .header("Referer", "${NgaDomains.origin(host)}/")
-
         if (uid.isNotBlank() && cid.isNotBlank()) {
             builder.header("Cookie", "ngaPassportUid=$uid; ngaPassportCid=$cid")
         }
-        return chain.proceed(builder.build())
+        return builder.build()
     }
 
     companion object {

@@ -7,6 +7,9 @@ import com.qingyi5427.ngaqing.data.local.AppDatabase
 import com.qingyi5427.ngaqing.data.local.FavoriteEntity
 import com.qingyi5427.ngaqing.data.local.FavoriteBoardEntity
 import com.qingyi5427.ngaqing.data.local.HistoryEntity
+import com.qingyi5427.ngaqing.data.local.ResponseCacheEntity
+import com.qingyi5427.ngaqing.data.local.DraftEntity
+import com.qingyi5427.ngaqing.data.local.WatchedThreadEntity
 import com.qingyi5427.ngaqing.data.local.UserPreferences
 import com.qingyi5427.ngaqing.data.model.Board
 import com.qingyi5427.ngaqing.data.model.BoardGroup
@@ -15,6 +18,8 @@ import com.qingyi5427.ngaqing.data.model.PostComment
 import com.qingyi5427.ngaqing.data.model.PostPage
 import com.qingyi5427.ngaqing.data.model.ThreadItem
 import com.qingyi5427.ngaqing.data.model.ThreadPage
+import com.qingyi5427.ngaqing.data.model.CommunityItem
+import com.qingyi5427.ngaqing.data.model.UserProfile
 import com.qingyi5427.ngaqing.data.remote.NgaApi
 import com.qingyi5427.ngaqing.data.remote.NgaResourceUrls
 import kotlinx.coroutines.delay
@@ -122,8 +127,14 @@ class NgaRepository @Inject constructor(
     // ---------- Board tree (app_api home category) ----------
 
     suspend fun getCategory(): Result<List<BoardGroup>> = runCatching {
-        val raw = api.homeCategory()
-        parseCategory(raw)
+        val cacheKey = "category"
+        val network = runCatching { api.homeCategory() }
+        val raw = network.getOrElse {
+            db.responseCacheDao().get(cacheKey)?.payload ?: throw it
+        }
+        val parsed = parseCategory(raw)
+        if (network.isSuccess && parsed.isNotEmpty()) cacheResponse(cacheKey, raw)
+        parsed
     }
 
     private fun parseCategory(json: String): List<BoardGroup> {
@@ -211,6 +222,10 @@ class NgaRepository @Inject constructor(
         recommendedOnly: Boolean = false,
         sortByPostDate: Boolean = false
     ): ThreadPage {
+        val cacheKey = listOf(
+            "threads", fid, stid.orEmpty(), page.toString(), authorId.orEmpty(),
+            recommendedOnly.toString(), sortByPostDate.toString()
+        ).joinToString(":")
         // NGA 偶发返回被截断的 JSON（响应不完整），解析/传输类失败自动重试
         var last: ThreadPage? = null
         repeat(3) { attempt ->
@@ -227,9 +242,17 @@ class NgaRepository @Inject constructor(
                     )
                 )
             }.getOrElse { ThreadPage(error = it.message ?: "error", raw = "") }
-            if (!isRetryableError(r.error)) return r
+            if (!isRetryableError(r.error)) {
+                if (r.error == null && r.raw.isNotBlank()) cacheResponse(cacheKey, r.raw)
+                return r
+            }
             last = r
             if (attempt < 2) delay(600L * (attempt + 1))
+        }
+        val cached = db.responseCacheDao().get(cacheKey)
+        if (cached != null) {
+            val parsed = parseThreads(cached.payload)
+            if (parsed.error == null) return parsed.copy(fromCache = true, cachedAt = cached.updatedAt)
         }
         return last ?: ThreadPage(error = "加载失败", raw = "")
     }
@@ -328,15 +351,24 @@ class NgaRepository @Inject constructor(
         page: Int = 1,
         authorId: String? = null
     ): PostPage {
+        val cacheKey = "posts:$tid:$page:${authorId.orEmpty()}"
         // NGA 偶发返回被截断的 JSON（响应不完整），解析/传输类失败自动重试
         var last: PostPage? = null
         repeat(3) { attempt ->
             val r = runCatching {
                 parsePosts(api.read(tid, page, authorId = authorId))
             }.getOrElse { PostPage(error = it.message ?: "error", raw = "") }
-            if (!isRetryableError(r.error)) return r
+            if (!isRetryableError(r.error)) {
+                if (r.error == null && r.raw.isNotBlank()) cacheResponse(cacheKey, r.raw)
+                return r
+            }
             last = r
             if (attempt < 2) delay(600L * (attempt + 1))
+        }
+        val cached = db.responseCacheDao().get(cacheKey)
+        if (cached != null) {
+            val parsed = parsePosts(cached.payload)
+            if (parsed.error == null) return parsed.copy(fromCache = true, cachedAt = cached.updatedAt)
         }
         return last ?: PostPage(error = "加载失败", raw = "")
     }
@@ -442,11 +474,19 @@ class NgaRepository @Inject constructor(
 
     // ---------- Search (forum.php) ----------
 
-    suspend fun search(key: String, fid: String? = null, stid: String? = null): ThreadPage =
-        runCatching {
+    suspend fun search(key: String, fid: String? = null, stid: String? = null): ThreadPage {
+        val cacheKey = "search:${key.trim()}:${fid.orEmpty()}:${stid.orEmpty()}"
+        return runCatching {
             val raw = api.search(key = key, fid = fid.takeUnless { stid != null }, stid = stid)
-            parseThreads(raw)
-        }.getOrElse { ThreadPage(error = it.message ?: "error", raw = "") }
+            parseThreads(raw).also {
+                if (it.error == null && it.raw.isNotBlank()) cacheResponse(cacheKey, it.raw)
+            }
+        }.getOrElse { error ->
+            val cached = db.responseCacheDao().get(cacheKey)
+            cached?.let { parseThreads(it.payload).copy(fromCache = true, cachedAt = it.updatedAt) }
+                ?: ThreadPage(error = error.message ?: "error", raw = "")
+        }
+    }
 
     // ---------- Reply (post.php) ----------
 
@@ -478,7 +518,191 @@ class NgaRepository @Inject constructor(
         }
     }
 
+    suspend fun publish(
+        action: String,
+        fid: String,
+        tid: String? = null,
+        pid: String? = null,
+        stid: String? = null,
+        subject: String = "",
+        content: String
+    ): Result<String> = runCatching {
+        require(action in setOf("new", "reply", "quote")) { "不支持的发布动作" }
+        val raw = api.publish(
+            action = action,
+            fid = fid,
+            stid = stid,
+            tid = tid,
+            pid = pid,
+            subject = subject,
+            content = content
+        )
+        parsePublishResult(raw, if (action == "new") "主题发布成功" else "回复成功")
+    }
+
+    private fun parsePublishResult(raw: String, fallbackSuccess: String): String {
+        val clean = preprocess(raw)
+        val root = runCatching { JSONObject(clean) }.getOrNull()
+        val error = root?.optJSONObject("error")
+        if (error != null) {
+            val message = error.keys().asSequence().joinToString(" ") { error.optString(it) }
+            throw IllegalStateException(message.substringAfter(':', message).ifBlank { "发布失败" })
+        }
+        val data = root?.optJSONObject("data")
+        val values = data?.keys()?.asSequence()?.map { data.optString(it) }?.toList().orEmpty()
+        val explicit = values.firstOrNull {
+            it.contains("成功") || it.contains("发布") || it.contains("回复")
+        }
+        if (explicit != null || Regex("(?:发帖|发布|回复)[^<\\s]{0,16}成功").containsMatchIn(raw)) {
+            return explicit ?: fallbackSuccess
+        }
+        // NGA 成功响应在不同版块可能只返回跳转地址或 tid/pid 数字。
+        if (data != null && data.length() > 0 && values.none { it.contains("失败") || it.contains("错误") }) {
+            return fallbackSuccess
+        }
+        throw IllegalStateException("服务器没有返回明确的成功结果，请刷新确认后再决定是否重试")
+    }
+
     // ---------- Shared helpers ----------
+
+    private suspend fun cacheResponse(key: String, payload: String) {
+        db.responseCacheDao().put(ResponseCacheEntity(key, payload))
+        db.responseCacheDao().prune(System.currentTimeMillis() - CACHE_RETENTION_MILLIS)
+    }
+
+    suspend fun clearResponseCache() = db.responseCacheDao().clear()
+
+    // ---------- Drafts ----------
+
+    suspend fun draft(key: String): DraftEntity? = db.draftDao().get(key)
+
+    fun drafts(): Flow<List<DraftEntity>> = db.draftDao().all()
+
+    suspend fun saveDraft(item: DraftEntity) = db.draftDao().put(item)
+
+    suspend fun deleteDraft(key: String) = db.draftDao().delete(key)
+
+    // ---------- Watched threads ----------
+
+    fun watchedThreads(): Flow<List<WatchedThreadEntity>> = db.watchedThreadDao().all()
+
+    suspend fun isWatching(tid: String): Boolean = db.watchedThreadDao().get(tid) != null
+
+    suspend fun watchThread(tid: String, title: String, fid: String, replies: Int) {
+        db.watchedThreadDao().put(
+            WatchedThreadEntity(
+                tid = tid,
+                title = title,
+                fid = fid,
+                lastKnownReplies = replies,
+                lastSeenReplies = replies
+            )
+        )
+    }
+
+    suspend fun unwatchThread(tid: String) = db.watchedThreadDao().delete(tid)
+
+    // ---------- Community / user ----------
+
+    suspend fun notifications(since: Long = 0): Result<List<CommunityItem>> = runCatching {
+        parseCommunityItems(api.notifications(since = since), "提醒")
+    }
+
+    suspend fun privateMessages(page: Int = 1): Result<List<CommunityItem>> = runCatching {
+        parseCommunityItems(api.messages(page = page), "私信")
+    }
+
+    suspend fun userProfile(uid: String): Result<UserProfile> = runCatching {
+        val root = JSONObject(preprocess(api.userInfo(uid = uid)))
+        val data = root.optJSONObject("data") ?: throw IllegalStateException(errorOf(root, root.toString()))
+        val item = data.optJSONObject("0") ?: data
+        UserProfile(
+            uid = item.optString("uid", uid),
+            username = item.optString("username", uid),
+            avatar = normalizeNgaAvatarUrl(item.optString("avatar", "")),
+            group = item.optString("group", ""),
+            title = item.optString("title", ""),
+            signature = item.optString("sign", ""),
+            posts = item.optInt("posts", 0),
+            reputation = item.optInt("rvrc", 0),
+            followedBy = item.optInt("follow_by_num", 0),
+            lastVisit = item.optLong("lastvisit", 0L)
+        )
+    }
+
+    suspend fun userTopics(uid: String, page: Int = 1): Result<List<ThreadItem>> = runCatching {
+        val root = JSONObject(preprocess(api.userTopics(uid = uid, page = page)))
+        val data = root.optJSONObject("data") ?: throw IllegalStateException(errorOf(root, root.toString()))
+        val items = mutableListOf<ThreadItem>()
+        collectObjects(data).forEach { item ->
+            val tid = item.optString("tid", "")
+            val subject = stripTags(item.optString("subject", item.optString("title", "")))
+            if (tid.isNotBlank() && subject.isNotBlank()) {
+                items += ThreadItem(
+                    tid = tid,
+                    subject = subject,
+                    author = item.optString("author", item.optString("username", "")),
+                    authorId = item.optString("authorid", uid),
+                    postDate = item.optLong("postdate", item.optLong("time", 0L)),
+                    lastPostDate = item.optLong("lastpost", item.optLong("postdate", 0L)),
+                    replies = item.optInt("replies", 0),
+                    forumName = item.optString("fname", item.optString("forum", ""))
+                )
+            }
+        }
+        items.distinctBy { it.tid }
+    }
+
+    private fun parseCommunityItems(raw: String, fallbackTitle: String): List<CommunityItem> {
+        val root = JSONObject(preprocess(raw))
+        val error = root.optJSONObject("error")
+        if (error != null) throw IllegalStateException(errorOf(root, raw))
+        val data = root.optJSONObject("data") ?: return emptyList()
+        return collectObjects(data).mapIndexedNotNull { index, item ->
+            val tid = item.optString("tid", item.optString("topic_id", ""))
+            val pid = item.optString("pid", item.optString("post_id", ""))
+            val title = stripTags(
+                item.optString("subject", item.optString("title", item.optString("type", "")))
+            ).ifBlank { fallbackTitle }
+            val summary = stripTags(
+                item.optString("content", item.optString("message", item.optString("msg", "")))
+            )
+            val actor = item.optString(
+                "username",
+                item.optString("author", item.optString("from", item.optString("from_username", "")))
+            )
+            if (title == fallbackTitle && summary.isBlank() && actor.isBlank() && tid.isBlank()) {
+                return@mapIndexedNotNull null
+            }
+            CommunityItem(
+                id = item.optString("id", item.optString("mid", "$fallbackTitle-$index-${tid}-${pid}")),
+                title = title,
+                summary = summary,
+                actor = actor,
+                tid = tid,
+                pid = pid,
+                createdAt = item.optLong("time", item.optLong("postdate", item.optLong("lastpost", 0L))),
+                unread = item.optInt("read", item.optInt("is_read", 0)) == 0
+            )
+        }.distinctBy { it.id }
+    }
+
+    private fun collectObjects(value: Any?): List<JSONObject> {
+        val out = mutableListOf<JSONObject>()
+        fun visit(current: Any?) {
+            when (current) {
+                is JSONObject -> {
+                    val hasIdentity = current.has("tid") || current.has("mid") || current.has("subject") ||
+                        current.has("content") || current.has("username") || current.has("author")
+                    if (hasIdentity) out += current
+                    current.keys().asSequence().forEach { visit(current.opt(it)) }
+                }
+                is JSONArray -> for (i in 0 until current.length()) visit(current.opt(i))
+            }
+        }
+        visit(value)
+        return out
+    }
 
     private fun resolveAttachPrefix(data: JSONObject): String {
         val g = data.optJSONObject("__GLOBAL") ?: return FALLBACK_ATTACH_PREFIX
@@ -497,6 +721,7 @@ class NgaRepository @Inject constructor(
     companion object {
         // NGA 当前可用图床根（2026-08 CDN 迁移后）。当接口未返回 _ATTACH_BASE_VIEW 时使用。
         private const val FALLBACK_ATTACH_PREFIX = "https://img.nga.cn/attachments/"
+        private const val CACHE_RETENTION_MILLIS = 14L * 24 * 60 * 60 * 1000
     }
 
     private fun rewriteImages(html: String, attachPrefix: String): String {
@@ -681,10 +906,41 @@ class NgaRepository @Inject constructor(
                 author = author
             )
         )
+        runCatching { api.addServerFavorite(tid = tid) }
     }
 
     suspend fun removeFavorite(tid: String) {
         db.favoriteDao().deleteByTid(tid)
+        runCatching { api.removeServerFavorite(tid = tid, tidArray = tid) }
+    }
+
+    /**
+     * 把 NGA 账号中的主题收藏合并进本地收藏。服务端接口不提供本地分组信息，
+     * 因此只补充缺失项目，不覆盖用户已设置的分组和本地时间。
+     */
+    suspend fun syncServerFavorites(): Result<Int> = runCatching {
+        val page = parseThreads(api.threadList(favor = 1, page = 1))
+        page.error?.let { error(it) }
+        var added = 0
+        page.threads.forEach { thread ->
+            if (thread.tid.isNotBlank() && db.favoriteDao().get(thread.tid) == null) {
+                db.favoriteDao().insert(
+                    FavoriteEntity(
+                        tid = thread.tid,
+                        title = thread.subject.ifBlank { "主题 ${thread.tid}" },
+                        fid = "",
+                        author = thread.author,
+                        folder = "来自 NGA"
+                    )
+                )
+                added++
+            }
+        }
+        added
+    }
+
+    suspend fun moveFavorite(tid: String, folder: String) {
+        db.favoriteDao().updateFolder(tid, folder.trim().ifBlank { "默认" })
     }
 
     // ---------- Reading history ----------

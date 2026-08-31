@@ -6,6 +6,22 @@ import org.junit.Test
 
 class PostContentParserTest {
     @Test
+    fun parsesCodeBlockWithoutTreatingUrlsAsLinks() {
+        val blocks = PostContentParser.parse("前文[code]val url = \"https://example.com\"[/code]后文")
+
+        assertTrue(blocks.any { it is PostBlock.Code && it.text.contains("val url") })
+        assertTrue(blocks.none { it is PostBlock.Link })
+    }
+
+    @Test
+    fun rendersListItemsAsBullets() {
+        val blocks = PostContentParser.parse("[list][*]第一项[*]第二项[/list]")
+        val text = blocks.filterIsInstance<PostBlock.Text>().joinToString("") { it.text }
+
+        assertTrue(text.contains("• 第一项"))
+        assertTrue(text.contains("• 第二项"))
+    }
+    @Test
     fun parsesTextAndFormatting() {
         val blocks = PostContentParser.parse("你好[b]论坛[/b][del]旧内容[/del]")
         assertTrue(blocks.filterIsInstance<PostBlock.Text>().any { it.text == "你好" })

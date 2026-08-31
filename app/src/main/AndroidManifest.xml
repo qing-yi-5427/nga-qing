@@ -6,7 +6,7 @@
 
     <application
         android:name="com.qingyi5427.ngaqing.NgaApplication"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:enableOnBackInvokedCallback="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"

@@ -22,4 +22,7 @@ class RootViewModel @Inject constructor(
     val userId = prefs.uid.stateIn(viewModelScope, SharingStarted.Eagerly, "")
     val blacklistUsers = prefs.blacklistUsers.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
     val blacklistKeywords = prefs.blacklistKeywords.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+    val readingTextScale = prefs.readingTextScale.stateIn(viewModelScope, SharingStarted.Eagerly, 1f)
+    val readingLineSpacing = prefs.readingLineSpacing.stateIn(viewModelScope, SharingStarted.Eagerly, 1f)
+    val showSignatures = prefs.showSignatures.stateIn(viewModelScope, SharingStarted.Eagerly, true)
 }

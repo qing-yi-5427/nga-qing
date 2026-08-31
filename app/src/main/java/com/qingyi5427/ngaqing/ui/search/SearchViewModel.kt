@@ -14,7 +14,7 @@ import javax.inject.Inject
 sealed interface SearchUiState {
     data object Empty : SearchUiState
     data object Loading : SearchUiState
-    data class Success(val threads: List<ThreadItem>) : SearchUiState
+    data class Success(val threads: List<ThreadItem>, val fromCache: Boolean = false) : SearchUiState
     data class Error(val raw: String, val msg: String) : SearchUiState
 }
 
@@ -35,7 +35,7 @@ class SearchViewModel @Inject constructor(
             if (result.error != null) {
                 _uiState.value = SearchUiState.Error(result.raw, result.error)
             } else {
-                _uiState.value = SearchUiState.Success(result.threads)
+                _uiState.value = SearchUiState.Success(result.threads, result.fromCache)
             }
         }
     }

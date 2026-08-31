@@ -16,6 +16,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -73,6 +74,13 @@ fun ProfileScreen(nav: NavHostController, root: RootViewModel = hiltViewModel())
                 }
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            ProfileRow("消息与关注", Icons.Outlined.Notifications) {
+                nav.navigate(Routes.COMMUNITY)
+            }
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant,
+                modifier = Modifier.padding(start = 64.dp)
+            )
             ProfileRow("浏览历史", Icons.Outlined.History) {
                 nav.navigate(Routes.HISTORY)
             }

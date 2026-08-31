@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.qingyi5427.ngaqing.data.model.ThreadItem
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -12,6 +14,10 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
+import org.json.JSONArray
+import org.json.JSONObject
+
+data class SavedAccount(val uid: String, val cid: String, val username: String)
 
 private val Context.dataStore by preferencesDataStore("user_prefs")
 
@@ -28,6 +34,10 @@ class UserPreferences @Inject constructor(
 
     val themeMode: Flow<String> = ds.data.map { it[KEY_THEME] ?: "system" }
     val ngaDomain: Flow<String> = ds.data.map { NgaDomains.normalizeHost(it[KEY_NGA_DOMAIN]) }
+    val readingTextScale: Flow<Float> = ds.data.map { (it[KEY_READING_TEXT_SCALE] ?: 1f).coerceIn(0.9f, 1.35f) }
+    val readingLineSpacing: Flow<Float> = ds.data.map { (it[KEY_READING_LINE_SPACING] ?: 1f).coerceIn(0.9f, 1.25f) }
+    val showSignatures: Flow<Boolean> = ds.data.map { it[KEY_SHOW_SIGNATURES] ?: true }
+    val accounts: Flow<List<SavedAccount>> = ds.data.map { parseAccounts(it[KEY_ACCOUNTS]) }
 
     val blacklistUsers: Flow<Set<String>> = ds.data.map { csv(it[KEY_BL_USERS]) }
     val blacklistKeywords: Flow<Set<String>> = ds.data.map { csv(it[KEY_BL_KEYWORDS]) }
@@ -37,14 +47,50 @@ class UserPreferences @Inject constructor(
             it[KEY_UID] = uid
             it[KEY_CID] = cid
             it[KEY_UNAME] = uname
+            val accounts = parseAccounts(it[KEY_ACCOUNTS]).filterNot { account -> account.uid == uid } +
+                SavedAccount(uid, cid, uname)
+            it[KEY_ACCOUNTS] = encodeAccounts(accounts)
         }
     }
 
     suspend fun clearAuth() {
         ds.edit {
+            val activeUid = it[KEY_UID]
+            if (!activeUid.isNullOrBlank()) {
+                it[KEY_ACCOUNTS] = encodeAccounts(
+                    parseAccounts(it[KEY_ACCOUNTS]).filterNot { account -> account.uid == activeUid }
+                )
+            }
             it.remove(KEY_UID)
             it.remove(KEY_CID)
             it.remove(KEY_UNAME)
+        }
+    }
+
+    suspend fun switchAccount(uid: String): Boolean {
+        var switched = false
+        ds.edit {
+            val account = parseAccounts(it[KEY_ACCOUNTS]).firstOrNull { account -> account.uid == uid }
+            if (account != null) {
+                it[KEY_UID] = account.uid
+                it[KEY_CID] = account.cid
+                it[KEY_UNAME] = account.username
+                switched = true
+            }
+        }
+        return switched
+    }
+
+    suspend fun removeAccount(uid: String) {
+        ds.edit {
+            it[KEY_ACCOUNTS] = encodeAccounts(
+                parseAccounts(it[KEY_ACCOUNTS]).filterNot { account -> account.uid == uid }
+            )
+            if (it[KEY_UID] == uid) {
+                it.remove(KEY_UID)
+                it.remove(KEY_CID)
+                it.remove(KEY_UNAME)
+            }
         }
     }
 
@@ -54,6 +100,18 @@ class UserPreferences @Inject constructor(
 
     suspend fun setNgaDomain(host: String) {
         ds.edit { it[KEY_NGA_DOMAIN] = NgaDomains.normalizeHost(host) }
+    }
+
+    suspend fun setReadingTextScale(value: Float) {
+        ds.edit { it[KEY_READING_TEXT_SCALE] = value.coerceIn(0.9f, 1.35f) }
+    }
+
+    suspend fun setReadingLineSpacing(value: Float) {
+        ds.edit { it[KEY_READING_LINE_SPACING] = value.coerceIn(0.9f, 1.25f) }
+    }
+
+    suspend fun setShowSignatures(value: Boolean) {
+        ds.edit { it[KEY_SHOW_SIGNATURES] = value }
     }
 
     suspend fun setBlacklistUsers(set: Set<String>) {
@@ -69,12 +127,40 @@ class UserPreferences @Inject constructor(
     private fun csv(s: String?): Set<String> =
         s?.split(",")?.map { it.trim() }?.filter { it.isNotBlank() }?.toSet() ?: emptySet()
 
+    private fun parseAccounts(raw: String?): List<SavedAccount> = runCatching {
+        val array = JSONArray(raw ?: "[]")
+        buildList {
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                val uid = item.optString("uid")
+                val cid = item.optString("cid")
+                if (uid.isNotBlank() && cid.isNotBlank()) {
+                    add(SavedAccount(uid, cid, item.optString("username")))
+                }
+            }
+        }
+    }.getOrDefault(emptyList())
+
+    private fun encodeAccounts(accounts: List<SavedAccount>): String = JSONArray().apply {
+        accounts.forEach { account ->
+            put(JSONObject().apply {
+                put("uid", account.uid)
+                put("cid", account.cid)
+                put("username", account.username)
+            })
+        }
+    }.toString()
+
     companion object {
         val KEY_UID = stringPreferencesKey("uid")
         val KEY_CID = stringPreferencesKey("cid")
         val KEY_UNAME = stringPreferencesKey("uname")
         val KEY_THEME = stringPreferencesKey("theme")
         val KEY_NGA_DOMAIN = stringPreferencesKey("nga_domain")
+        val KEY_READING_TEXT_SCALE = floatPreferencesKey("reading_text_scale")
+        val KEY_READING_LINE_SPACING = floatPreferencesKey("reading_line_spacing")
+        val KEY_SHOW_SIGNATURES = booleanPreferencesKey("show_signatures")
+        val KEY_ACCOUNTS = stringPreferencesKey("accounts")
         val KEY_BL_USERS = stringPreferencesKey("bl_users")
         val KEY_BL_KEYWORDS = stringPreferencesKey("bl_keywords")
     }

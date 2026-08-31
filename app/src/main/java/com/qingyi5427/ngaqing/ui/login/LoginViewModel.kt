@@ -34,6 +34,26 @@ class LoginViewModel @Inject constructor(
 
     // Guards against re-capturing / re-navigating after a successful login.
     private var captured = false
+    private val _webReady = MutableStateFlow(false)
+    val webReady: StateFlow<Boolean> = _webReady.asStateFlow()
+    private var loginPrepared = false
+
+    fun prepareLogin(addingAccount: Boolean) {
+        if (loginPrepared) return
+        loginPrepared = true
+        if (!addingAccount) {
+            _webReady.value = true
+        } else {
+            viewModelScope.launch {
+                loginHelper.prepareAdditionalLogin()
+                _webReady.value = true
+            }
+        }
+    }
+
+    fun restoreSavedCookies() {
+        viewModelScope.launch { loginHelper.syncAuthCookies() }
+    }
 
     /**
      * Called from WebViewClient.onPageFinished. NGA QR login writes the passport

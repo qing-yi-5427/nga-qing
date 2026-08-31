@@ -31,6 +31,10 @@ import com.qingyi5427.ngaqing.ui.search.SearchScreen
 import com.qingyi5427.ngaqing.ui.settings.SettingsScreen
 import com.qingyi5427.ngaqing.ui.history.HistoryScreen
 import com.qingyi5427.ngaqing.ui.thread.ThreadListScreen
+import com.qingyi5427.ngaqing.ui.compose.NewTopicScreen
+import com.qingyi5427.ngaqing.ui.community.CommunityScreen
+import com.qingyi5427.ngaqing.ui.user.UserScreen
+import com.qingyi5427.ngaqing.ui.web.WebEditorScreen
 import com.qingyi5427.ngaqing.ui.theme.NgaQingTheme
 
 private const val PAGE_TRANSITION_MILLIS = 280
@@ -43,6 +47,9 @@ fun NgaNavHost(
 ) {
     val themeMode by root.themeMode.collectAsStateWithLifecycle()
     val authState by root.authState.collectAsStateWithLifecycle()
+    val readingTextScale by root.readingTextScale.collectAsStateWithLifecycle()
+    val readingLineSpacing by root.readingLineSpacing.collectAsStateWithLifecycle()
+    val showSignatures by root.showSignatures.collectAsStateWithLifecycle()
     val startDestination = if (authState == true) Routes.BOARDS else Routes.LOGIN
 
     val dark = when (themeMode) {
@@ -51,7 +58,12 @@ fun NgaNavHost(
         else -> isSystemInDarkTheme()
     }
 
-    NgaQingTheme(themeMode = themeMode) {
+    NgaQingTheme(
+        themeMode = themeMode,
+        readingTextScale = readingTextScale,
+        readingLineSpacing = readingLineSpacing,
+        showSignatures = showSignatures
+    ) {
         if (authState == null) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
@@ -95,6 +107,7 @@ fun NgaNavHost(
                 }
             ) {
             composable(Routes.LOGIN) { LoginScreen(nav) }
+            composable(Routes.ADD_ACCOUNT) { LoginScreen(nav, addingAccount = true) }
 
             composable(Routes.BOARDS) { BoardScreen(nav) }
 
@@ -150,6 +163,39 @@ fun NgaNavHost(
                 val stid = backStack.arguments?.getString("stid")
                 SearchScreen(nav, fid, stid)
             }
+
+            composable(
+                route = Routes.NEW_TOPIC,
+                arguments = listOf(
+                    navArgument("fid") { type = NavType.StringType },
+                    navArgument("name") { type = NavType.StringType },
+                    navArgument("stid") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    }
+                )
+            ) {
+                NewTopicScreen(nav)
+            }
+
+            composable(Routes.COMMUNITY) { CommunityScreen(nav) }
+
+            composable(
+                route = Routes.USER,
+                arguments = listOf(
+                    navArgument("uid") { type = NavType.StringType },
+                    navArgument("name") { type = NavType.StringType }
+                )
+            ) { UserScreen(nav) }
+
+            composable(
+                route = Routes.WEB_EDITOR,
+                arguments = listOf(
+                    navArgument("url") { type = NavType.StringType },
+                    navArgument("title") { type = NavType.StringType }
+                )
+            ) { WebEditorScreen(nav) }
         }
     }
 }

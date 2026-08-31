@@ -1,6 +1,7 @@
 package com.qingyi5427.ngaqing.ui.search
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -92,6 +93,18 @@ fun SearchScreen(
                         }
                     } else {
                         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
+                            if (current.fromCache) {
+                                item(key = "offline-banner", contentType = "offline-banner") {
+                                    Text(
+                                        "当前显示离线搜索结果",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        modifier = Modifier.fillMaxWidth()
+                                            .background(MaterialTheme.colorScheme.secondaryContainer)
+                                            .padding(horizontal = 16.dp, vertical = 10.dp)
+                                    )
+                                }
+                            }
                             items(
                                 current.threads,
                                 key = { it.tid },

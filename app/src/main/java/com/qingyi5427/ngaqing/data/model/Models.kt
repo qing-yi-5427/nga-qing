@@ -72,7 +72,9 @@ data class ThreadPage(
     val subBoards: List<Board> = emptyList(),
     val totalRows: Int = 0,
     val error: String? = null,
-    val raw: String = ""
+    val raw: String = "",
+    val fromCache: Boolean = false,
+    val cachedAt: Long = 0L
 )
 
 @Immutable
@@ -85,5 +87,33 @@ data class PostPage(
     val totalRows: Int = 0,
     val error: String? = null,
     val raw: String = "",
-    val users: Map<String, String> = emptyMap()  // uid -> username，用于引用/评论显示作者名
+    val users: Map<String, String> = emptyMap(),  // uid -> username，用于引用/评论显示作者名
+    val fromCache: Boolean = false,
+    val cachedAt: Long = 0L
+)
+
+@Immutable
+data class CommunityItem(
+    val id: String,
+    val title: String,
+    val summary: String = "",
+    val actor: String = "",
+    val tid: String = "",
+    val pid: String = "",
+    val createdAt: Long = 0L,
+    val unread: Boolean = false
+)
+
+@Immutable
+data class UserProfile(
+    val uid: String,
+    val username: String,
+    val avatar: String = "",
+    val group: String = "",
+    val title: String = "",
+    val signature: String = "",
+    val posts: Int = 0,
+    val reputation: Int = 0,
+    val followedBy: Int = 0,
+    val lastVisit: Long = 0L
 )

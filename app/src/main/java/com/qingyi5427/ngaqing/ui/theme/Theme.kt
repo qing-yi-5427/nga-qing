@@ -14,7 +14,13 @@ import androidx.compose.ui.unit.dp
 
 /** 「暖纸面」设计系统：降低装饰噪声，让标题、正文和讨论关系成为视觉主体。 */
 @Composable
-fun NgaQingTheme(themeMode: String = "system", content: @Composable () -> Unit) {
+fun NgaQingTheme(
+    themeMode: String = "system",
+    readingTextScale: Float = 1f,
+    readingLineSpacing: Float = 1f,
+    showSignatures: Boolean = true,
+    content: @Composable () -> Unit
+) {
     val darkTheme = when (themeMode) {
         "dark" -> true
         "light" -> false
@@ -28,10 +34,22 @@ fun NgaQingTheme(themeMode: String = "system", content: @Composable () -> Unit) 
         large = RoundedCornerShape(16.dp),
         extraLarge = RoundedCornerShape(24.dp)
     )
-    CompositionLocalProvider(LocalGlassPalette provides palette) {
+    CompositionLocalProvider(
+        LocalGlassPalette provides palette,
+        LocalShowSignatures provides showSignatures
+    ) {
         MaterialTheme(
             colorScheme = if (darkTheme) paperDark else paperLight,
-            typography = NgaTypography,
+            typography = NgaTypography.copy(
+                bodyLarge = NgaTypography.bodyLarge.copy(
+                    fontSize = NgaTypography.bodyLarge.fontSize * readingTextScale,
+                    lineHeight = NgaTypography.bodyLarge.lineHeight * readingTextScale * readingLineSpacing
+                ),
+                bodyMedium = NgaTypography.bodyMedium.copy(
+                    fontSize = NgaTypography.bodyMedium.fontSize * readingTextScale,
+                    lineHeight = NgaTypography.bodyMedium.lineHeight * readingTextScale * readingLineSpacing
+                )
+            ),
             shapes = shapes,
             content = content
         )
@@ -96,3 +114,4 @@ private val DarkPaper = GlassPalette(
 )
 
 val LocalGlassPalette = staticCompositionLocalOf { LightPaper }
+val LocalShowSignatures = staticCompositionLocalOf { true }

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -21,6 +22,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,16 +42,27 @@ import com.qingyi5427.ngaqing.data.local.NgaDomains
 @Composable
 fun LoginScreen(
     nav: NavHostController,
+    addingAccount: Boolean = false,
     viewModel: LoginViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val ngaDomain by viewModel.ngaDomain.collectAsStateWithLifecycle()
+    val webReady by viewModel.webReady.collectAsStateWithLifecycle()
     var loading by remember { mutableStateOf(true) }
     var webView by remember { mutableStateOf<WebView?>(null) }
 
+    LaunchedEffect(addingAccount) {
+        viewModel.prepareLogin(addingAccount)
+    }
+    DisposableEffect(addingAccount) {
+        onDispose {
+            if (addingAccount) viewModel.restoreSavedCookies()
+        }
+    }
     LaunchedEffect(state) {
         if (state is LoginState.Success) {
-            nav.navigate(Routes.BOARDS) { popUpTo(Routes.LOGIN) { inclusive = true } }
+            if (addingAccount) nav.popBackStack()
+            else nav.navigate(Routes.BOARDS) { popUpTo(Routes.LOGIN) { inclusive = true } }
         }
     }
 
@@ -59,7 +72,14 @@ fun LoginScreen(
     Scaffold(
         topBar = {
             AppTopBar(
-                title = "登录 NGA",
+                title = if (addingAccount) "添加 NGA 账号" else "登录 NGA",
+                navigationIcon = {
+                    if (addingAccount) {
+                        IconButton(onClick = { nav.popBackStack() }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        }
+                    }
+                },
                 actions = {
                     // NGA QR login only writes the passport cookies after a manual
                     // page refresh, so we expose a refresh button here.
@@ -73,7 +93,7 @@ fun LoginScreen(
         Box(Modifier.fillMaxSize().padding(inner)) {
             Column(Modifier.fillMaxSize()) {
                 Box(Modifier.weight(1f).fillMaxWidth()) {
-                    androidx.compose.ui.viewinterop.AndroidView(
+                    if (webReady) androidx.compose.ui.viewinterop.AndroidView(
                         modifier = Modifier.fillMaxSize(),
                         factory = { ctx ->
                             WebView(ctx).apply {
@@ -103,7 +123,7 @@ fun LoginScreen(
                             view.destroy()
                         }
                     )
-                    if (loading) {
+                    if (loading || !webReady) {
                         Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator() }
                     }
                 }

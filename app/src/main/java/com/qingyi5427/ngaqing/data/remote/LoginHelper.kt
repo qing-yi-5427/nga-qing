@@ -113,6 +113,19 @@ class LoginHelper @Inject constructor(
         runCatching { cm.flush() }
     }
 
+    /** 为添加另一个账号清理网页会话，但保留 DataStore 中已有的账号列表。 */
+    suspend fun prepareAdditionalLogin(): Unit = withContext(Dispatchers.IO) {
+        val cm = CookieManager.getInstance()
+        withContext(Dispatchers.Main.immediate) {
+            suspendCancellableCoroutine { continuation ->
+                cm.removeAllCookies {
+                    if (continuation.isActive) continuation.resume(Unit)
+                }
+            }
+        }
+        runCatching { cm.flush() }
+    }
+
     /**
      * CookieManager#setCookie accepts one Set-Cookie value, not an HTTP Cookie header.
      * UID and CID must therefore be written separately and awaited before a WebView loads.

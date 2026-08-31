@@ -39,6 +39,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -52,6 +54,12 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.FormatQuote
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Share
@@ -96,8 +104,11 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDecoration
@@ -113,13 +124,16 @@ import coil.compose.AsyncImage
 import com.qingyi5427.ngaqing.data.model.Post
 import com.qingyi5427.ngaqing.data.local.NgaDomains
 import com.qingyi5427.ngaqing.data.remote.NgaInterceptor
+import com.qingyi5427.ngaqing.ui.Routes
 import com.qingyi5427.ngaqing.ui.theme.LocalGlassPalette
+import com.qingyi5427.ngaqing.ui.theme.LocalShowSignatures
 import com.qingyi5427.ngaqing.ui.gesture.SwipeBackContainer
 import com.qingyi5427.ngaqing.ui.util.formatAuthorName
 import com.qingyi5427.ngaqing.ui.util.formatRelative
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -137,6 +151,9 @@ fun PostScreen(
     val targetFloor by viewModel.targetFloor.collectAsStateWithLifecycle()
     val totalRows by viewModel.totalRows.collectAsStateWithLifecycle()
     val onlyAuthor by viewModel.onlyAuthor.collectAsStateWithLifecycle()
+    val replyTarget by viewModel.replyTarget.collectAsStateWithLifecycle()
+    val savedDraft by viewModel.draftContent.collectAsStateWithLifecycle()
+    val watching by viewModel.watching.collectAsStateWithLifecycle()
     val ngaDomain by viewModel.ngaDomain.collectAsStateWithLifecycle()
     val webCookiesReady by viewModel.webCookiesReady.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -173,6 +190,13 @@ fun PostScreen(
                 replyText = ""
             }
         }
+    }
+
+    // 只在编辑器打开时防抖保存，避免初始空状态覆盖磁盘上的旧草稿。
+    LaunchedEffect(replyOpen, replyText, replyTarget) {
+        if (!replyOpen) return@LaunchedEffect
+        delay(600)
+        viewModel.saveDraft(replyText)
     }
 
     // 滚到底部附近自动加载下一页（无限滚动）
@@ -298,6 +322,19 @@ fun PostScreen(
                             }
                         )
                         DropdownMenuItem(
+                            text = { Text(if (watching) "取消关注主题" else "关注主题") },
+                            leadingIcon = {
+                                Icon(
+                                    if (watching) Icons.Filled.NotificationsOff else Icons.Filled.NotificationsActive,
+                                    null
+                                )
+                            },
+                            onClick = {
+                                menuOpen = false
+                                viewModel.toggleWatching()
+                            }
+                        )
+                        DropdownMenuItem(
                             text = { Text("跳转楼层") },
                             leadingIcon = { Icon(Icons.Filled.SwapVert, null) },
                             onClick = {
@@ -378,28 +415,57 @@ fun PostScreen(
                         state = listState,
                         contentPadding = PaddingValues(bottom = 96.dp)
                     ) {
+                        if (cur.fromCache) {
+                            item(key = "offline-banner", contentType = "offline-banner") {
+                                Text(
+                                    "当前显示离线缓存 · 下拉刷新可重试",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.fillMaxWidth()
+                                        .background(MaterialTheme.colorScheme.secondaryContainer)
+                                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                                )
+                            }
+                        }
                         items(
                             posts,
                             key = { it.pid.ifBlank { it.lou } },
                             contentType = { "post-floor" }
                         ) { post ->
-                            PostCard(post, cur.renderData[post.renderKey()], { viewerUrl.value = it }) { floor ->
-                                val idx = posts.indexOfFirst { it.lou == floor }
-                                if (idx >= 0) {
-                                    scope.launch {
-                                        suppressQuickActionScroll = true
-                                        try {
-                                            listState.animateScrollToItem(idx)
-                                        } finally {
-                                            suppressQuickActionScroll = false
-                                            quickActionsVisible = true
-                                            quickActionsExpanded = false
+                            PostCard(
+                                post = post,
+                                renderData = cur.renderData[post.renderKey()],
+                                onImage = { viewerUrl.value = it },
+                                onJumpToFloor = { floor ->
+                                    val idx = posts.indexOfFirst { it.lou == floor }
+                                    if (idx >= 0) {
+                                        scope.launch {
+                                            suppressQuickActionScroll = true
+                                            try {
+                                                listState.animateScrollToItem(idx)
+                                            } finally {
+                                                suppressQuickActionScroll = false
+                                                quickActionsVisible = true
+                                                quickActionsExpanded = false
+                                            }
                                         }
+                                    } else {
+                                        Toast.makeText(ctx, "该楼层尚未加载", Toast.LENGTH_SHORT).show()
                                     }
-                                } else {
-                                    Toast.makeText(ctx, "该楼层尚未加载", Toast.LENGTH_SHORT).show()
+                                },
+                                onReply = { target, quote ->
+                                    viewModel.setReplyTarget(target, quote)
+                                    replyText = ""
+                                    replyOpen = true
+                                },
+                                onOpenUser = { target ->
+                                    if (target.authorId.isNotBlank() && target.authorId.toLongOrNull()?.let { it > 0 } == true) {
+                                        nav.navigate(Routes.userRoute(target.authorId, target.author))
+                                    } else {
+                                        Toast.makeText(ctx, "匿名用户没有公开主页", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
-                            }
+                            )
                             Spacer(
                                 Modifier.fillMaxWidth().height(8.dp)
                                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.38f))
@@ -458,6 +524,8 @@ fun PostScreen(
                             onToggle = { quickActionsExpanded = !quickActionsExpanded },
                             onReply = {
                                 quickActionsExpanded = false
+                                viewModel.setReplyTarget(null)
+                                replyText = savedDraft
                                 replyOpen = true
                             },
                             onPage = {
@@ -598,7 +666,15 @@ fun PostScreen(
                     .padding(start = 20.dp, end = 20.dp, bottom = 20.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("回复帖子", style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        replyTarget?.let {
+                            if (it.quote) "引用 #${it.floor} · ${formatAuthorName(it.author)}"
+                            else "回复 #${it.floor} · ${formatAuthorName(it.author)}"
+                        } ?: "回复帖子",
+                        style = MaterialTheme.typography.titleLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                     Spacer(Modifier.weight(1f))
                     TextButton(onClick = { replyOpen = false }, enabled = !replying) {
                         Text("取消")
@@ -622,8 +698,23 @@ fun PostScreen(
                     maxLines = 14,
                     modifier = Modifier.fillMaxWidth()
                 )
+                TextButton(
+                    onClick = {
+                        replyOpen = false
+                        nav.navigate(
+                            Routes.webReplyRoute(
+                                ngaDomain,
+                                viewModel.tid,
+                                replyTarget?.pid
+                            )
+                        )
+                    },
+                    modifier = Modifier.align(Alignment.End)
+                ) {
+                    Text("图片、附件与高级格式")
+                }
                 Text(
-                    "发送前会保留当前内容；只有服务器明确确认成功后编辑器才会关闭。",
+                    "内容会自动保存为草稿；只有服务器明确确认成功后编辑器才会关闭。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 10.dp)
@@ -736,11 +827,17 @@ private fun PostCard(
     post: Post,
     renderData: PostRenderData?,
     onImage: (String) -> Unit,
-    onJumpToFloor: (Int) -> Unit
+    onJumpToFloor: (Int) -> Unit,
+    onReply: (Post, Boolean) -> Unit,
+    onOpenUser: (Post) -> Unit
 ) {
     val g = LocalGlassPalette.current
     val blocks = renderData?.body.orEmpty()
     val sigBlocks = renderData?.signature.orEmpty()
+    val showSignatures = LocalShowSignatures.current
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    var floorMenuOpen by remember(post.pid) { mutableStateOf(false) }
 
     Column(
         Modifier.fillMaxWidth()
@@ -795,12 +892,71 @@ private fun PostCard(
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary
             )
+            Box {
+                IconButton(onClick = { floorMenuOpen = true }) {
+                    Icon(Icons.Filled.MoreHoriz, contentDescription = "${post.lou}楼操作")
+                }
+                DropdownMenu(
+                    expanded = floorMenuOpen,
+                    onDismissRequest = { floorMenuOpen = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("回复这层") },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.Reply, null) },
+                        onClick = {
+                            floorMenuOpen = false
+                            onReply(post, false)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("引用这层") },
+                        leadingIcon = { Icon(Icons.Filled.FormatQuote, null) },
+                        onClick = {
+                            floorMenuOpen = false
+                            onReply(post, true)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("复制内容") },
+                        leadingIcon = { Icon(Icons.Filled.ContentCopy, null) },
+                        onClick = {
+                            floorMenuOpen = false
+                            clipboard.setText(AnnotatedString(post.content))
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("查看用户主页") },
+                        leadingIcon = { Icon(Icons.Filled.PersonSearch, null) },
+                        onClick = {
+                            floorMenuOpen = false
+                            onOpenUser(post)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("分享本楼链接") },
+                        leadingIcon = { Icon(Icons.Filled.Link, null) },
+                        onClick = {
+                            floorMenuOpen = false
+                            val url = "https://bbs.nga.cn/read.php?tid=${post.tid}&pid=${post.pid}"
+                            context.startActivity(
+                                Intent.createChooser(
+                                    Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(Intent.EXTRA_TEXT, url)
+                                    },
+                                    "分享本楼"
+                                )
+                            )
+                        }
+                    )
+                }
+            }
         }
         Spacer(Modifier.height(12.dp))
         // 正文
         blocks.forEach { block -> RenderBlock(block, onImage, onJumpToFloor) }
         // 签名
-        if (sigBlocks.isNotEmpty()) {
+        if (showSignatures && sigBlocks.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
             Spacer(Modifier.fillMaxWidth().height(1.dp).background(g.rowDivider))
             Spacer(Modifier.height(6.dp))
@@ -902,6 +1058,22 @@ private fun RenderBlock(
                 textDecoration = if (block.strike) TextDecoration.LineThrough else TextDecoration.None,
                 color = MaterialTheme.colorScheme.onSurface
             )
+        }
+        is PostBlock.Code -> {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            ) {
+                SelectionContainer {
+                    Text(
+                        block.text,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                        modifier = Modifier.horizontalScroll(rememberScrollState()).padding(12.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
         is PostBlock.Link -> {
             val context = LocalContext.current

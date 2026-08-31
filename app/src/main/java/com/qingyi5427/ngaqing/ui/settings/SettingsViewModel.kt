@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.qingyi5427.ngaqing.data.local.UserPreferences
 import com.qingyi5427.ngaqing.data.local.NgaDomains
 import com.qingyi5427.ngaqing.data.remote.LoginHelper
+import com.qingyi5427.ngaqing.data.repository.NgaRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -16,7 +17,8 @@ import javax.inject.Inject
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
     private val prefs: UserPreferences,
-    private val loginHelper: LoginHelper
+    private val loginHelper: LoginHelper,
+    private val repo: NgaRepository
 ) : ViewModel() {
 
     val themeMode: StateFlow<String> =
@@ -27,9 +29,55 @@ class SettingsViewModel @Inject constructor(
         prefs.blacklistUsers.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
     val blacklistKeywords: StateFlow<Set<String>> =
         prefs.blacklistKeywords.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+    val readingTextScale: StateFlow<Float> =
+        prefs.readingTextScale.stateIn(viewModelScope, SharingStarted.Eagerly, 1f)
+    val readingLineSpacing: StateFlow<Float> =
+        prefs.readingLineSpacing.stateIn(viewModelScope, SharingStarted.Eagerly, 1f)
+    val showSignatures: StateFlow<Boolean> =
+        prefs.showSignatures.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val accounts = prefs.accounts.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val activeUid = prefs.uid.stateIn(viewModelScope, SharingStarted.Eagerly, "")
 
     fun setTheme(mode: String) {
         viewModelScope.launch { prefs.setTheme(mode) }
+    }
+
+    fun setReadingTextScale(value: Float) {
+        viewModelScope.launch { prefs.setReadingTextScale(value) }
+    }
+
+    fun setReadingLineSpacing(value: Float) {
+        viewModelScope.launch { prefs.setReadingLineSpacing(value) }
+    }
+
+    fun setShowSignatures(value: Boolean) {
+        viewModelScope.launch { prefs.setShowSignatures(value) }
+    }
+
+    fun clearOfflineCache() {
+        viewModelScope.launch { repo.clearResponseCache() }
+    }
+
+    fun switchAccount(uid: String) {
+        viewModelScope.launch {
+            if (prefs.switchAccount(uid)) loginHelper.syncAuthCookies()
+        }
+    }
+
+    fun removeAccount(uid: String) {
+        viewModelScope.launch {
+            val wasActive = prefs.uid.first() == uid
+            prefs.removeAccount(uid)
+            if (wasActive) {
+                val next = prefs.accounts.first().firstOrNull()
+                if (next != null) {
+                    prefs.switchAccount(next.uid)
+                    loginHelper.syncAuthCookies()
+                } else {
+                    loginHelper.clearAuth()
+                }
+            }
+        }
     }
 
     fun setNgaDomain(host: String) {
