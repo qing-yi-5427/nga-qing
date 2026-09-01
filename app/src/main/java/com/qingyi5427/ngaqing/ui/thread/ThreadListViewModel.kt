@@ -2,6 +2,7 @@ package com.qingyi5427.ngaqing.ui.thread
 
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.viewModelScope
 import com.qingyi5427.ngaqing.data.model.ThreadItem
 import com.qingyi5427.ngaqing.data.model.Board
@@ -18,6 +19,7 @@ import javax.inject.Inject
 
 sealed interface ThreadUiState {
     data object Loading : ThreadUiState
+    @Immutable
     data class Success(
         val threads: List<ThreadItem>,
         val subBoards: List<Board>,

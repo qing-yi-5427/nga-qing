@@ -5,6 +5,7 @@ import com.qingyi5427.ngaqing.data.local.NgaDomains
 import com.qingyi5427.ngaqing.data.remote.GbkConverterFactory
 import com.qingyi5427.ngaqing.data.remote.NgaApi
 import com.qingyi5427.ngaqing.data.remote.NgaInterceptor
+import com.qingyi5427.ngaqing.BuildConfig
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -29,12 +30,17 @@ object NetworkModule {
     @Provides
     @Singleton
     fun provideOkHttpClient(interceptor: NgaInterceptor): OkHttpClient {
-        val logging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BASIC
-        }
         return OkHttpClient.Builder()
             .addInterceptor(interceptor as Interceptor)
-            .addInterceptor(logging)
+            .apply {
+                // Coil 也复用这个客户端；Release 若记录 BASIC 日志，会为每张头像/正文图
+                // 产生两次 Logcat I/O，在快速滚动时形成可见抖动。
+                if (BuildConfig.DEBUG) {
+                    addInterceptor(HttpLoggingInterceptor().apply {
+                        level = HttpLoggingInterceptor.Level.BASIC
+                    })
+                }
+            }
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .build()

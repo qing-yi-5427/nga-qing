@@ -23,13 +23,21 @@ import com.qingyi5427.ngaqing.data.model.UserProfile
 import com.qingyi5427.ngaqing.data.remote.NgaApi
 import com.qingyi5427.ngaqing.data.remote.NgaResourceUrls
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Normalize the different avatar URL shapes returned by NGA's user dictionary.
@@ -124,6 +132,12 @@ class NgaRepository @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
 
+    /** 缓存持久化不阻塞网络结果交付；同一把锁保证“清空缓存”不会和后台写入交错。 */
+    private val cacheScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val cacheMutex = Mutex()
+    private val lastCachePruneAt = AtomicLong(0L)
+    private val cacheGeneration = AtomicLong(0L)
+
     // ---------- Board tree (app_api home category) ----------
 
     suspend fun getCategory(): Result<List<BoardGroup>> = runCatching {
@@ -132,7 +146,7 @@ class NgaRepository @Inject constructor(
         val raw = network.getOrElse {
             db.responseCacheDao().get(cacheKey)?.payload ?: throw it
         }
-        val parsed = parseCategory(raw)
+        val parsed = parseCategoryOffMain(raw)
         if (network.isSuccess && parsed.isNotEmpty()) cacheResponse(cacheKey, raw)
         parsed
     }
@@ -230,7 +244,7 @@ class NgaRepository @Inject constructor(
         var last: ThreadPage? = null
         repeat(3) { attempt ->
             val r = runCatching {
-                parseThreads(
+                parseThreadsOffMain(
                     api.threadList(
                         fid = fid.takeUnless { stid != null },
                         stid = stid,
@@ -251,7 +265,7 @@ class NgaRepository @Inject constructor(
         }
         val cached = db.responseCacheDao().get(cacheKey)
         if (cached != null) {
-            val parsed = parseThreads(cached.payload)
+            val parsed = parseThreadsOffMain(cached.payload)
             if (parsed.error == null) return parsed.copy(fromCache = true, cachedAt = cached.updatedAt)
         }
         return last ?: ThreadPage(error = "加载失败", raw = "")
@@ -356,7 +370,7 @@ class NgaRepository @Inject constructor(
         var last: PostPage? = null
         repeat(3) { attempt ->
             val r = runCatching {
-                parsePosts(api.read(tid, page, authorId = authorId))
+                parsePostsOffMain(api.read(tid, page, authorId = authorId))
             }.getOrElse { PostPage(error = it.message ?: "error", raw = "") }
             if (!isRetryableError(r.error)) {
                 if (r.error == null && r.raw.isNotBlank()) cacheResponse(cacheKey, r.raw)
@@ -367,7 +381,7 @@ class NgaRepository @Inject constructor(
         }
         val cached = db.responseCacheDao().get(cacheKey)
         if (cached != null) {
-            val parsed = parsePosts(cached.payload)
+            val parsed = parsePostsOffMain(cached.payload)
             if (parsed.error == null) return parsed.copy(fromCache = true, cachedAt = cached.updatedAt)
         }
         return last ?: PostPage(error = "加载失败", raw = "")
@@ -478,12 +492,12 @@ class NgaRepository @Inject constructor(
         val cacheKey = "search:${key.trim()}:${fid.orEmpty()}:${stid.orEmpty()}"
         return runCatching {
             val raw = api.search(key = key, fid = fid.takeUnless { stid != null }, stid = stid)
-            parseThreads(raw).also {
+            parseThreadsOffMain(raw).also {
                 if (it.error == null && it.raw.isNotBlank()) cacheResponse(cacheKey, it.raw)
             }
         }.getOrElse { error ->
             val cached = db.responseCacheDao().get(cacheKey)
-            cached?.let { parseThreads(it.payload).copy(fromCache = true, cachedAt = it.updatedAt) }
+            cached?.let { parseThreadsOffMain(it.payload).copy(fromCache = true, cachedAt = it.updatedAt) }
                 ?: ThreadPage(error = error.message ?: "error", raw = "")
         }
     }
@@ -537,7 +551,9 @@ class NgaRepository @Inject constructor(
             subject = subject,
             content = content
         )
-        parsePublishResult(raw, if (action == "new") "主题发布成功" else "回复成功")
+        withContext(Dispatchers.Default) {
+            parsePublishResult(raw, if (action == "new") "主题发布成功" else "回复成功")
+        }
     }
 
     private fun parsePublishResult(raw: String, fallbackSuccess: String): String {
@@ -565,12 +581,31 @@ class NgaRepository @Inject constructor(
 
     // ---------- Shared helpers ----------
 
-    private suspend fun cacheResponse(key: String, payload: String) {
-        db.responseCacheDao().put(ResponseCacheEntity(key, payload))
-        db.responseCacheDao().prune(System.currentTimeMillis() - CACHE_RETENTION_MILLIS)
+    private fun cacheResponse(key: String, payload: String) {
+        val generation = cacheGeneration.get()
+        cacheScope.launch {
+            runCatching {
+                cacheMutex.withLock {
+                    if (generation != cacheGeneration.get()) return@withLock
+                    db.responseCacheDao().put(ResponseCacheEntity(key, payload))
+                    val now = System.currentTimeMillis()
+                    val previous = lastCachePruneAt.get()
+                    if (now - previous >= CACHE_PRUNE_INTERVAL_MILLIS &&
+                        lastCachePruneAt.compareAndSet(previous, now)
+                    ) {
+                        db.responseCacheDao().prune(now - CACHE_RETENTION_MILLIS)
+                    }
+                }
+            }.onFailure { error ->
+                Log.w("NgaCache", "后台缓存写入失败: $key", error)
+            }
+        }
     }
 
-    suspend fun clearResponseCache() = db.responseCacheDao().clear()
+    suspend fun clearResponseCache() = withContext(Dispatchers.IO) {
+        cacheGeneration.incrementAndGet()
+        cacheMutex.withLock { db.responseCacheDao().clear() }
+    }
 
     // ---------- Drafts ----------
 
@@ -605,53 +640,70 @@ class NgaRepository @Inject constructor(
     // ---------- Community / user ----------
 
     suspend fun notifications(since: Long = 0): Result<List<CommunityItem>> = runCatching {
-        parseCommunityItems(api.notifications(since = since), "提醒")
+        val raw = api.notifications(since = since)
+        withContext(Dispatchers.Default) { parseCommunityItems(raw, "提醒") }
     }
 
     suspend fun privateMessages(page: Int = 1): Result<List<CommunityItem>> = runCatching {
-        parseCommunityItems(api.messages(page = page), "私信")
+        val raw = api.messages(page = page)
+        withContext(Dispatchers.Default) { parseCommunityItems(raw, "私信") }
     }
 
     suspend fun userProfile(uid: String): Result<UserProfile> = runCatching {
-        val root = JSONObject(preprocess(api.userInfo(uid = uid)))
-        val data = root.optJSONObject("data") ?: throw IllegalStateException(errorOf(root, root.toString()))
-        val item = data.optJSONObject("0") ?: data
-        UserProfile(
-            uid = item.optString("uid", uid),
-            username = item.optString("username", uid),
-            avatar = normalizeNgaAvatarUrl(item.optString("avatar", "")),
-            group = item.optString("group", ""),
-            title = item.optString("title", ""),
-            signature = item.optString("sign", ""),
-            posts = item.optInt("posts", 0),
-            reputation = item.optInt("rvrc", 0),
-            followedBy = item.optInt("follow_by_num", 0),
-            lastVisit = item.optLong("lastvisit", 0L)
-        )
+        val raw = api.userInfo(uid = uid)
+        withContext(Dispatchers.Default) {
+            val root = JSONObject(preprocess(raw))
+            val data = root.optJSONObject("data") ?: throw IllegalStateException(errorOf(root, root.toString()))
+            val item = data.optJSONObject("0") ?: data
+            UserProfile(
+                uid = item.optString("uid", uid),
+                username = item.optString("username", uid),
+                avatar = normalizeNgaAvatarUrl(item.optString("avatar", "")),
+                group = item.optString("group", ""),
+                title = item.optString("title", ""),
+                signature = item.optString("sign", ""),
+                posts = item.optInt("posts", 0),
+                reputation = item.optInt("rvrc", 0),
+                followedBy = item.optInt("follow_by_num", 0),
+                lastVisit = item.optLong("lastvisit", 0L)
+            )
+        }
     }
 
     suspend fun userTopics(uid: String, page: Int = 1): Result<List<ThreadItem>> = runCatching {
-        val root = JSONObject(preprocess(api.userTopics(uid = uid, page = page)))
-        val data = root.optJSONObject("data") ?: throw IllegalStateException(errorOf(root, root.toString()))
-        val items = mutableListOf<ThreadItem>()
-        collectObjects(data).forEach { item ->
-            val tid = item.optString("tid", "")
-            val subject = stripTags(item.optString("subject", item.optString("title", "")))
-            if (tid.isNotBlank() && subject.isNotBlank()) {
-                items += ThreadItem(
-                    tid = tid,
-                    subject = subject,
-                    author = item.optString("author", item.optString("username", "")),
-                    authorId = item.optString("authorid", uid),
-                    postDate = item.optLong("postdate", item.optLong("time", 0L)),
-                    lastPostDate = item.optLong("lastpost", item.optLong("postdate", 0L)),
-                    replies = item.optInt("replies", 0),
-                    forumName = item.optString("fname", item.optString("forum", ""))
-                )
+        val raw = api.userTopics(uid = uid, page = page)
+        withContext(Dispatchers.Default) {
+            val root = JSONObject(preprocess(raw))
+            val data = root.optJSONObject("data") ?: throw IllegalStateException(errorOf(root, root.toString()))
+            val items = mutableListOf<ThreadItem>()
+            collectObjects(data).forEach { item ->
+                val tid = item.optString("tid", "")
+                val subject = stripTags(item.optString("subject", item.optString("title", "")))
+                if (tid.isNotBlank() && subject.isNotBlank()) {
+                    items += ThreadItem(
+                        tid = tid,
+                        subject = subject,
+                        author = item.optString("author", item.optString("username", "")),
+                        authorId = item.optString("authorid", uid),
+                        postDate = item.optLong("postdate", item.optLong("time", 0L)),
+                        lastPostDate = item.optLong("lastpost", item.optLong("postdate", 0L)),
+                        replies = item.optInt("replies", 0),
+                        forumName = item.optString("fname", item.optString("forum", ""))
+                    )
+                }
             }
+            items.distinctBy { it.tid }
         }
-        items.distinctBy { it.tid }
     }
+
+    private suspend fun parseCategoryOffMain(raw: String): List<BoardGroup> =
+        withContext(Dispatchers.Default) { parseCategory(raw) }
+
+    private suspend fun parseThreadsOffMain(raw: String): ThreadPage =
+        withContext(Dispatchers.Default) { parseThreads(raw) }
+
+    private suspend fun parsePostsOffMain(raw: String): PostPage =
+        withContext(Dispatchers.Default) { parsePosts(raw) }
 
     private fun parseCommunityItems(raw: String, fallbackTitle: String): List<CommunityItem> {
         val root = JSONObject(preprocess(raw))
@@ -722,6 +774,7 @@ class NgaRepository @Inject constructor(
         // NGA 当前可用图床根（2026-08 CDN 迁移后）。当接口未返回 _ATTACH_BASE_VIEW 时使用。
         private const val FALLBACK_ATTACH_PREFIX = "https://img.nga.cn/attachments/"
         private const val CACHE_RETENTION_MILLIS = 14L * 24 * 60 * 60 * 1000
+        private const val CACHE_PRUNE_INTERVAL_MILLIS = 24L * 60 * 60 * 1000
     }
 
     private fun rewriteImages(html: String, attachPrefix: String): String {
@@ -919,7 +972,7 @@ class NgaRepository @Inject constructor(
      * 因此只补充缺失项目，不覆盖用户已设置的分组和本地时间。
      */
     suspend fun syncServerFavorites(): Result<Int> = runCatching {
-        val page = parseThreads(api.threadList(favor = 1, page = 1))
+        val page = parseThreadsOffMain(api.threadList(favor = 1, page = 1))
         page.error?.let { error(it) }
         var added = 0
         page.threads.forEach { thread ->

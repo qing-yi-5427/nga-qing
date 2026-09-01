@@ -79,6 +79,9 @@
 - 新增 benchmark 模块，覆盖暖启动和论坛列表上下滚动，可持续输出 StartupTiming 与 FrameTiming 指标。
 - 应用显式请求当前物理分辨率下的最高刷新率，避免部分系统把第三方应用限制为 60Hz，也不会为追求高刷切换分辨率。
 - 网页兜底页仅在创建时清理旧未登录缓存，加载后恢复正常资源缓存，避免 LOAD_NO_CACHE 降低网页图片与脚本复用效率。
+- 2026-09-01 性能回归修复：大型主题/帖子 JSON 与 HTML 清洗移到后台计算线程；离线缓存改为串行异步写入，过期清理从“每次请求”降为“每天至多一次”。
+- 主题列表和帖子列表的自动翻页只在最后可见项变化时判断，不再逐帧收集完整 `LazyListLayoutInfo`；阅读进度改为滚动停止后落盘，避免快速滑动期间反复触发 Room 写入。
+- OkHttp 每次请求将 UID、CID、域名合并为一次 DataStore 快照读取；帖子/主题 UI 状态标为不可变，阅读主题字体和 Shapes 使用记忆化对象，减少无效分配与重组。
 
 ### 创作、互动与个人体系
 
@@ -120,7 +123,7 @@
 - 启动及上述操作期间未发现 AndroidRuntime、Room 或 SQLite 崩溃。
 - MIUI 已开启“USB 调试（安全设置）”，后续可以继续执行真机自动化手势与滚动验证。
 - 项目及应用名称已统一为 `nga-qing`，Android `applicationId` 为 `com.qingyi5427.ngaqing`；不兼容旧版 `com.ngaclient.app` 的安装数据，请求中不再使用其他客户端的身份标识。
-- 本轮 Release APK：`nga-qing-release.apk`，SHA-256：`3227BF33F77B63EF533F8BADBA947066F4BFE4FC9136E8DE4A3AB911AB940694`。
+- 本轮 Release APK：`nga-qing-release.apk`，SHA-256：`48EC0256FF633181E8D104F089EB87879126CD24F82528E2C7B046FFD26FDF28`。
 
 ## 参考
 

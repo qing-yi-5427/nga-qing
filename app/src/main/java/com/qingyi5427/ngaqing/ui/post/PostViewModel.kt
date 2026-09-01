@@ -2,6 +2,7 @@ package com.qingyi5427.ngaqing.ui.post
 
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.viewModelScope
 import com.qingyi5427.ngaqing.data.model.Post
 import com.qingyi5427.ngaqing.data.local.NgaDomains
@@ -22,6 +23,7 @@ import javax.inject.Inject
 
 sealed interface PostUiState {
     data object Loading : PostUiState
+    @Immutable
     data class Success(
         val posts: List<Post>,
         val page: Int,
@@ -33,6 +35,7 @@ sealed interface PostUiState {
     data class Error(val raw: String, val msg: String) : PostUiState
 }
 
+@Immutable
 data class ReplyTarget(
     val pid: String,
     val author: String,

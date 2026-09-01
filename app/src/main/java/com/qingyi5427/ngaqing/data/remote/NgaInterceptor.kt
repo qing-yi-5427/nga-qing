@@ -2,7 +2,6 @@ package com.qingyi5427.ngaqing.data.remote
 
 import com.qingyi5427.ngaqing.data.local.UserPreferences
 import com.qingyi5427.ngaqing.data.local.NgaDomains
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import okhttp3.Interceptor
 import okhttp3.Response
@@ -17,9 +16,13 @@ class NgaInterceptor @Inject constructor(
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
-        val uid = runBlocking { prefs.uid.first() }
-        val cid = runBlocking { prefs.cid.first() }
-        val host = runBlocking { prefs.ngaDomain.first() }
+        // Coil 头像/正文图与 API 复用此客户端。稳定态必须走内存快照，不能让每张图片
+        // 都 runBlocking 读取 DataStore；仅应用刚启动、首个快照尚未到达时同步加载一次。
+        val preferences = prefs.requestPreferencesOrNull()
+            ?: runBlocking { prefs.requestPreferences() }
+        val uid = preferences.uid
+        val cid = preferences.cid
+        val host = preferences.ngaDomain
         if (!NgaDomains.isForumHost(request.url.host)) {
             return chain.proceed(authenticatedRequest(request, request.url.host, uid, cid))
         }

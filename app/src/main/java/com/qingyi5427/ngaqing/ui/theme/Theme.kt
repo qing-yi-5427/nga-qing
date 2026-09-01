@@ -9,6 +9,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
@@ -27,34 +28,39 @@ fun NgaQingTheme(
         else -> isSystemInDarkTheme()
     }
     val palette = if (darkTheme) DarkPaper else LightPaper
-    val shapes = Shapes(
-        extraSmall = RoundedCornerShape(6.dp),
-        small = RoundedCornerShape(8.dp),
-        medium = RoundedCornerShape(12.dp),
-        large = RoundedCornerShape(16.dp),
-        extraLarge = RoundedCornerShape(24.dp)
-    )
+    val shapes = remember { NgaShapes }
+    val typography = remember(readingTextScale, readingLineSpacing) {
+        NgaTypography.copy(
+            bodyLarge = NgaTypography.bodyLarge.copy(
+                fontSize = NgaTypography.bodyLarge.fontSize * readingTextScale,
+                lineHeight = NgaTypography.bodyLarge.lineHeight * readingTextScale * readingLineSpacing
+            ),
+            bodyMedium = NgaTypography.bodyMedium.copy(
+                fontSize = NgaTypography.bodyMedium.fontSize * readingTextScale,
+                lineHeight = NgaTypography.bodyMedium.lineHeight * readingTextScale * readingLineSpacing
+            )
+        )
+    }
     CompositionLocalProvider(
         LocalGlassPalette provides palette,
         LocalShowSignatures provides showSignatures
     ) {
         MaterialTheme(
             colorScheme = if (darkTheme) paperDark else paperLight,
-            typography = NgaTypography.copy(
-                bodyLarge = NgaTypography.bodyLarge.copy(
-                    fontSize = NgaTypography.bodyLarge.fontSize * readingTextScale,
-                    lineHeight = NgaTypography.bodyLarge.lineHeight * readingTextScale * readingLineSpacing
-                ),
-                bodyMedium = NgaTypography.bodyMedium.copy(
-                    fontSize = NgaTypography.bodyMedium.fontSize * readingTextScale,
-                    lineHeight = NgaTypography.bodyMedium.lineHeight * readingTextScale * readingLineSpacing
-                )
-            ),
+            typography = typography,
             shapes = shapes,
             content = content
         )
     }
 }
+
+private val NgaShapes = Shapes(
+    extraSmall = RoundedCornerShape(6.dp),
+    small = RoundedCornerShape(8.dp),
+    medium = RoundedCornerShape(12.dp),
+    large = RoundedCornerShape(16.dp),
+    extraLarge = RoundedCornerShape(24.dp)
+)
 
 private val paperLight = lightColorScheme(
     primary = Color(0xFF8A5100), onPrimary = Color.White,

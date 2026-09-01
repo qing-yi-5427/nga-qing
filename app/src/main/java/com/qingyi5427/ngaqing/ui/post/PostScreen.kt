@@ -201,13 +201,14 @@ fun PostScreen(
 
     // 滚到底部附近自动加载下一页（无限滚动）
     LaunchedEffect(listState) {
-        snapshotFlow { listState.layoutInfo }
-            .collect { info ->
-                val total = info.totalItemsCount
-                val visible = info.visibleItemsInfo.size
-                if (total == 0 || visible >= total) return@collect
-                if (info.visibleItemsInfo.last().index >= total - 4) viewModel.loadMore()
-            }
+        snapshotFlow {
+            listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+        }.distinctUntilChanged().collect { last ->
+            val info = listState.layoutInfo
+            val total = info.totalItemsCount
+            if (total == 0 || info.visibleItemsInfo.size >= total) return@collect
+            if (last >= total - 4) viewModel.loadMore()
+        }
     }
 
     // 下滑阅读时让快捷入口退出，反向上滑时再出现，避免长期遮挡正文。
@@ -266,10 +267,13 @@ fun PostScreen(
 
     LaunchedEffect(s, listState) {
         val current = s as? PostUiState.Success ?: return@LaunchedEffect
-        snapshotFlow { listState.firstVisibleItemIndex }
+        snapshotFlow { listState.isScrollInProgress }
             .distinctUntilChanged()
-            .collect { index ->
-                current.posts.getOrNull(index)?.let { viewModel.updateReadFloor(it.lou) }
+            .collect { scrolling ->
+                if (!scrolling) {
+                    current.posts.getOrNull(listState.firstVisibleItemIndex)
+                        ?.let { viewModel.updateReadFloor(it.lou) }
+                }
             }
     }
 

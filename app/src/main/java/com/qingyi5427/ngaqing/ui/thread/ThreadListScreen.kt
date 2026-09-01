@@ -93,10 +93,13 @@ fun ThreadListScreen(
     var menuOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(listState) {
-        snapshotFlow { listState.layoutInfo }.collect { info ->
+        snapshotFlow {
+            listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+        }.distinctUntilChanged().collect { last ->
+            val info = listState.layoutInfo
             val total = info.totalItemsCount
             val visible = info.visibleItemsInfo.size
-            if (total > 0 && visible < total && info.visibleItemsInfo.last().index >= total - 5) {
+            if (total > 0 && visible < total && last >= total - 5) {
                 viewModel.loadMore()
             }
         }

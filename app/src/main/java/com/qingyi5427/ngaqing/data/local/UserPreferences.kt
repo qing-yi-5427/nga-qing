@@ -12,12 +12,19 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 import org.json.JSONArray
 import org.json.JSONObject
 
 data class SavedAccount(val uid: String, val cid: String, val username: String)
+data class RequestPreferences(val uid: String, val cid: String, val ngaDomain: String)
 
 private val Context.dataStore by preferencesDataStore("user_prefs")
 
@@ -26,6 +33,16 @@ class UserPreferences @Inject constructor(
     @ApplicationContext context: Context
 ) {
     private val ds = context.dataStore
+    private val preferenceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Volatile private var cachedRequestPreferences: RequestPreferences? = null
+
+    init {
+        preferenceScope.launch {
+            ds.data.collect { values ->
+                cachedRequestPreferences = values.toRequestPreferences()
+            }
+        }
+    }
 
     val uid: Flow<String> = ds.data.map { it[KEY_UID].orEmpty() }
     val cid: Flow<String> = ds.data.map { it[KEY_CID].orEmpty() }
@@ -38,6 +55,14 @@ class UserPreferences @Inject constructor(
     val readingLineSpacing: Flow<Float> = ds.data.map { (it[KEY_READING_LINE_SPACING] ?: 1f).coerceIn(0.9f, 1.25f) }
     val showSignatures: Flow<Boolean> = ds.data.map { it[KEY_SHOW_SIGNATURES] ?: true }
     val accounts: Flow<List<SavedAccount>> = ds.data.map { parseAccounts(it[KEY_ACCOUNTS]) }
+
+    /** OkHttp 每个请求只读取一次 DataStore 快照，避免分别启动三个 Flow collector。 */
+    fun requestPreferencesOrNull(): RequestPreferences? = cachedRequestPreferences
+
+    suspend fun requestPreferences(): RequestPreferences =
+        cachedRequestPreferences ?: ds.data.first().toRequestPreferences().also {
+            cachedRequestPreferences = it
+        }
 
     val blacklistUsers: Flow<Set<String>> = ds.data.map { csv(it[KEY_BL_USERS]) }
     val blacklistKeywords: Flow<Set<String>> = ds.data.map { csv(it[KEY_BL_KEYWORDS]) }
@@ -150,6 +175,13 @@ class UserPreferences @Inject constructor(
             })
         }
     }.toString()
+
+    private fun androidx.datastore.preferences.core.Preferences.toRequestPreferences() =
+        RequestPreferences(
+            uid = this[KEY_UID].orEmpty(),
+            cid = this[KEY_CID].orEmpty(),
+            ngaDomain = NgaDomains.normalizeHost(this[KEY_NGA_DOMAIN])
+        )
 
     companion object {
         val KEY_UID = stringPreferencesKey("uid")
