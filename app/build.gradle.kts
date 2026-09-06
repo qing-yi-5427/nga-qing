@@ -19,8 +19,8 @@ android {
         applicationId = "com.qingyi5427.ngaqing"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.0.1"
         buildConfigField("String", "UI_VARIANT", "\"classic\"")
         ndk {
             abiFilters += listOf("arm64-v8a")
