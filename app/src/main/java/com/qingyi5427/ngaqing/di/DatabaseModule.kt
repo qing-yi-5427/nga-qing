@@ -5,6 +5,8 @@ import androidx.room.Room
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.qingyi5427.ngaqing.data.local.AppDatabase
+import com.qingyi5427.ngaqing.data.local.UserPreferences
+import com.qingyi5427.ngaqing.data.local.accountMigration3To4
 import com.qingyi5427.ngaqing.data.local.FavoriteDao
 import com.qingyi5427.ngaqing.data.local.FavoriteBoardDao
 import com.qingyi5427.ngaqing.data.local.HistoryDao
@@ -17,6 +19,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
+import kotlinx.coroutines.runBlocking
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -50,12 +53,16 @@ object DatabaseModule {
 
     @Provides
     @Singleton
-    fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase {
+    fun provideAppDatabase(@ApplicationContext context: Context, prefs: UserPreferences): AppDatabase {
         return Room.databaseBuilder(
             context,
             AppDatabase::class.java,
             AppDatabase.NAME
-        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
+        ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, accountMigration3To4 {
+            // Room invokes migrations while opening the database. Read the same DataStore instance
+            // used by authentication here, so ownership reflects the account at migration time.
+            runBlocking { prefs.requestPreferences().uid }
+        }).build()
     }
 
     @Provides

@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import javax.inject.Inject
 
 sealed interface SearchUiState {
@@ -25,13 +26,21 @@ class SearchViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow<SearchUiState>(SearchUiState.Empty)
     val uiState: StateFlow<SearchUiState> = _uiState.asStateFlow()
+    private var searchJob: Job? = null
+    private var generation = 0L
 
     fun search(key: String, fid: String? = null, stid: String? = null) {
         val k = key.trim()
-        if (k.isBlank()) return
+        searchJob?.cancel()
+        val request = ++generation
+        if (k.isBlank()) {
+            _uiState.value = SearchUiState.Empty
+            return
+        }
         _uiState.value = SearchUiState.Loading
-        viewModelScope.launch {
+        searchJob = viewModelScope.launch {
             val result = repo.search(k, fid, stid)
+            if (request != generation) return@launch
             if (result.error != null) {
                 _uiState.value = SearchUiState.Error(result.raw, result.error)
             } else {

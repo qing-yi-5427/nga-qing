@@ -8,6 +8,7 @@ import com.qingyi5427.ngaqing.data.model.Post
 import com.qingyi5427.ngaqing.data.local.NgaDomains
 import com.qingyi5427.ngaqing.data.local.UserPreferences
 import com.qingyi5427.ngaqing.data.local.DraftEntity
+import com.qingyi5427.ngaqing.data.local.RequestPreferences
 import com.qingyi5427.ngaqing.data.remote.LoginHelper
 import com.qingyi5427.ngaqing.data.repository.NgaRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -17,7 +18,15 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import android.util.Log
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
@@ -35,6 +44,18 @@ sealed interface PostUiState {
     data class Error(val raw: String, val msg: String) : PostUiState
 }
 
+internal data class ReadingPosition(val page: Int, val floor: Int)
+
+internal fun restoreReadingPosition(
+    savedFloor: Int?,
+    savedPage: Int?,
+    historyFloor: Int?
+): ReadingPosition {
+    val floor = savedFloor?.coerceAtLeast(0) ?: historyFloor?.coerceAtLeast(0)
+    val page = floor?.let { it / 30 + 1 } ?: savedPage?.coerceAtLeast(1) ?: 1
+    return ReadingPosition(page, floor ?: (page - 1) * 30)
+}
+
 @Immutable
 data class ReplyTarget(
     val pid: String,
@@ -48,7 +69,7 @@ class PostViewModel @Inject constructor(
     private val repo: NgaRepository,
     private val loginHelper: LoginHelper,
     prefs: UserPreferences,
-    savedStateHandle: SavedStateHandle
+    private val savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
     val tid: String = savedStateHandle.get<String>("tid") ?: ""
@@ -67,6 +88,10 @@ class PostViewModel @Inject constructor(
 
     private val _favorite = MutableStateFlow(false)
     val isFavorite: StateFlow<Boolean> = _favorite.asStateFlow()
+    private val _favoriteError = MutableStateFlow<String?>(null)
+    val favoriteError: StateFlow<String?> = _favoriteError.asStateFlow()
+    private var retryFavoriteAdd: Boolean? = null
+    private var favoriteBusy = false
 
     private val _isLoadingMore = MutableStateFlow(false)
     val isLoadingMore: StateFlow<Boolean> = _isLoadingMore.asStateFlow()
@@ -100,12 +125,23 @@ class PostViewModel @Inject constructor(
     private val _opAuthorId = MutableStateFlow("")
     private var threadAuthor: String = ""
     private var threadFid: String = ""
+    private var pageJob: Job? = null
+    private var pageGeneration = 0L
+    private var draftJob: Job? = null
+    @Volatile private var draftVersion = 0L
+    private val draftMutex = Mutex()
+    @Volatile private var session: RequestPreferences? = null
+    private var suppressDraftWrites = false
+    private val _replySucceeded = MutableStateFlow(false)
+    val replySucceeded: StateFlow<Boolean> = _replySucceeded.asStateFlow()
 
     init {
         viewModelScope.launch {
-            _favorite.value = repo.isFavorite(tid)
-            _watching.value = repo.isWatching(tid)
-            repo.draft(draftKey)?.let { draft ->
+            val owner = repo.captureSession()
+            session = owner
+            _favorite.value = repo.isFavorite(tid, owner)
+            _watching.value = repo.isWatching(tid, owner)
+            repo.draft(draftKey, owner)?.let { draft ->
                 _draftContent.value = draft.content
                 if (draft.targetPid.isNotBlank()) {
                     _replyTarget.value = ReplyTarget(
@@ -116,24 +152,34 @@ class PostViewModel @Inject constructor(
                     )
                 }
             }
-            val history = repo.history(tid)
+            val history = repo.history(tid, owner)
             _subject.value = history?.title.orEmpty()
-            val savedFloor = history?.lastFloor?.takeIf { it > 0 }
-            _targetFloor.value = savedFloor
-            load(savedFloor?.let { it / 30 + 1 } ?: 1)
+            val restored = restoreReadingPosition(
+                savedStateHandle["readingFloor"],
+                savedStateHandle["readingPage"],
+                history?.lastFloor?.takeIf { it > 0 }
+            )
+            _targetFloor.value = restored.floor
+            load(restored.page)
         }
     }
 
     fun load(page: Int = _page.value, showLoading: Boolean = true) {
         val p = page.coerceAtLeast(1)
-        _page.value = p
-        if (showLoading) _uiState.value = PostUiState.Loading else _isRefreshing.value = true
-        viewModelScope.launch {
+        pageJob?.cancel()
+        val request = ++pageGeneration
+        _isLoadingMore.value = false
+        _loadError.value = null
+        _isRefreshing.value = !showLoading
+        if (showLoading) _uiState.value = PostUiState.Loading
+        val authorId = _opAuthorId.value.takeIf { _onlyAuthor.value && it.isNotBlank() }
+        pageJob = viewModelScope.launch {
             val result = repo.getPosts(
                 tid,
                 p,
-                authorId = _opAuthorId.value.takeIf { _onlyAuthor.value && it.isNotBlank() }
+                authorId = authorId
             )
+            if (request != pageGeneration) return@launch
             if (result.error != null) {
                 if (showLoading || _uiState.value !is PostUiState.Success) {
                     _uiState.value = PostUiState.Error(result.raw, result.error)
@@ -152,6 +198,9 @@ class PostViewModel @Inject constructor(
             val tp = ((result.totalRows) + 29) / 30
             _totalPages.value = tp.coerceAtLeast(1)
             val renderData = prepareRenderData(result.posts, result.users)
+            if (request != pageGeneration) return@launch
+            _page.value = p
+            savedStateHandle["readingPage"] = p
             _uiState.value = PostUiState.Success(
                 result.posts,
                 p,
@@ -160,7 +209,7 @@ class PostViewModel @Inject constructor(
                 result.users,
                 renderData
             )
-            repo.recordHistory(tid, _subject.value, result.author, result.fid)
+            session?.let { repo.recordHistory(tid, _subject.value, result.author, result.fid, it) }
             _isRefreshing.value = false
         }
     }
@@ -178,17 +227,21 @@ class PostViewModel @Inject constructor(
     /** 追加式加载下一页（无限滚动 / 手动翻下一页都走这里）。 */
     fun loadMore() {
         val cur = _uiState.value as? PostUiState.Success ?: return
-        if (_isLoadingMore.value) return
+        if (_isLoadingMore.value || _isRefreshing.value) return
         val next = cur.page + 1
         if (next > cur.totalPages) return
         _isLoadingMore.value = true
         _loadError.value = null
-        viewModelScope.launch {
+        pageJob?.cancel()
+        val request = ++pageGeneration
+        val authorId = _opAuthorId.value.takeIf { _onlyAuthor.value && it.isNotBlank() }
+        pageJob = viewModelScope.launch {
             val result = repo.getPosts(
                 tid,
                 next,
-                authorId = _opAuthorId.value.takeIf { _onlyAuthor.value && it.isNotBlank() }
+                authorId = authorId
             )
+            if (request != pageGeneration) return@launch
             if (result.error != null) {
                 _loadError.value = result.error
                 _isLoadingMore.value = false
@@ -201,6 +254,7 @@ class PostViewModel @Inject constructor(
             val merged = (cur.posts + result.posts).distinctBy { it.pid.ifBlank { "floor-${it.lou}" } }
             val users = cur.users + result.users
             val newRenderData = prepareRenderData(result.posts, users, merged)
+            if (request != pageGeneration) return@launch
             _uiState.value = PostUiState.Success(
                 merged,
                 next,
@@ -230,44 +284,81 @@ class PostViewModel @Inject constructor(
         }
         _replying.value = true
         _replyResult.value = null
+        _replySucceeded.value = false
+        val target = _replyTarget.value
+        val owner = session
         viewModelScope.launch {
-            val target = _replyTarget.value
+            if (owner == null || !repo.isSessionCurrent(owner)) {
+                _replying.value = false
+                _replyResult.value = "账号已切换，请重新打开帖子后再回复"
+                return@launch
+            }
             val r = repo.publish(
                 action = if (target?.quote == true) "quote" else "reply",
                 fid = fid,
                 tid = tid,
                 pid = target?.pid ?: "0",
-                content = text
+                content = text,
+                session = owner
             )
-            _replying.value = false
             val success = r.getOrNull()
             if (success != null) {
-                repo.deleteDraft(draftKey)
+                draftJob?.cancel()
+                draftVersion++
+                draftJob = draftScope.launch {
+                    try {
+                        draftMutex.withLock { repo.deleteDraft(draftKey, owner) }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.w("NgaDraft", "回复成功后清理草稿失败", e)
+                    }
+                }
                 _draftContent.value = ""
                 _replyTarget.value = null
-                refreshTailAfterReply()
+                suppressDraftWrites = true
+                _replySucceeded.value = true
                 _replyResult.value = success
+                _replying.value = false
+                viewModelScope.launch {
+                    try {
+                        refreshTailAfterReply()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.w("NgaPosts", "回复后刷新失败", e)
+                    }
+                }
             } else {
+                if (r.exceptionOrNull() is CancellationException) throw r.exceptionOrNull() as CancellationException
                 _replyResult.value = r.exceptionOrNull()?.message ?: "回复失败"
+                _replying.value = false
             }
         }
     }
 
     /** 回复成功后读取最后一页，避免 loadMore 在“已是最后一页”时直接无操作。 */
     private suspend fun refreshTailAfterReply() {
+        pageJob?.cancel()
+        val request = ++pageGeneration
+        _isLoadingMore.value = false
+        _isRefreshing.value = false
         var target = _totalPages.value.coerceAtLeast(1)
         var result = repo.getPosts(tid, target)
+        if (request != pageGeneration) return
         if (result.error != null) return
         val newestTotal = ((result.totalRows + 29) / 30).coerceAtLeast(1)
         if (newestTotal > target) {
             target = newestTotal
             result = repo.getPosts(tid, target)
+            if (request != pageGeneration) return
             if (result.error != null) return
         }
+        val renderData = prepareRenderData(result.posts, result.users)
+        if (request != pageGeneration) return
         _page.value = target
         _totalPages.value = newestTotal
         _subject.value = result.posts.firstOrNull()?.subject ?: _subject.value
-        val renderData = prepareRenderData(result.posts, result.users)
         _uiState.value = PostUiState.Success(
             result.posts,
             target,
@@ -280,31 +371,48 @@ class PostViewModel @Inject constructor(
 
     fun consumeReplyResult() {
         _replyResult.value = null
+        _replySucceeded.value = false
     }
 
     fun setReplyTarget(post: Post?, quote: Boolean = false) {
+        suppressDraftWrites = false
         _replyTarget.value = post?.let { ReplyTarget(it.pid, it.author, it.lou, quote) }
     }
 
-    fun saveDraft(content: String) {
+    fun saveDraft(content: String, immediate: Boolean = false) {
+        if (suppressDraftWrites) return
         _draftContent.value = content
         val target = _replyTarget.value
-        viewModelScope.launch {
-            if (content.isBlank()) {
-                repo.deleteDraft(draftKey)
-            } else {
-                repo.saveDraft(
-                    DraftEntity(
-                        key = draftKey,
-                        kind = if (target?.quote == true) "quote" else "reply",
-                        tid = tid,
-                        fid = threadFid,
-                        targetPid = target?.pid.orEmpty(),
-                        targetAuthor = target?.author.orEmpty(),
-                        targetFloor = target?.floor ?: 0,
-                        content = content
-                    )
-                )
+        val fid = threadFid
+        draftJob?.cancel()
+        val version = ++draftVersion
+        draftJob = draftScope.launch {
+            if (!immediate) delay(300)
+            val owner = session ?: return@launch
+            try {
+                draftMutex.withLock {
+                    if (version != draftVersion) return@withLock
+                    if (content.isBlank()) {
+                        repo.deleteDraft(draftKey, owner)
+                    } else {
+                        repo.saveDraft(
+                            DraftEntity(
+                                key = draftKey,
+                                kind = if (target?.quote == true) "quote" else "reply",
+                                tid = tid,
+                                fid = fid,
+                                targetPid = target?.pid.orEmpty(),
+                                targetAuthor = target?.author.orEmpty(),
+                                targetFloor = target?.floor ?: 0,
+                                content = content
+                            ), owner
+                        )
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("NgaDraft", "回复草稿保存失败", e)
             }
         }
     }
@@ -312,20 +420,23 @@ class PostViewModel @Inject constructor(
     fun discardDraft() {
         _draftContent.value = ""
         _replyTarget.value = null
-        viewModelScope.launch { repo.deleteDraft(draftKey) }
+        saveDraft("", immediate = true)
     }
 
     fun toggleWatching() {
         viewModelScope.launch {
+            val owner = session ?: return@launch
+            if (!repo.isSessionCurrent(owner)) return@launch
             if (_watching.value) {
-                repo.unwatchThread(tid)
+                repo.unwatchThread(tid, owner)
                 _watching.value = false
             } else {
                 repo.watchThread(
                     tid = tid,
                     title = _subject.value,
                     fid = threadFid,
-                    replies = (_totalRows.value - 1).coerceAtLeast(0)
+                    replies = (_totalRows.value - 1).coerceAtLeast(0),
+                    session = owner
                 )
                 _watching.value = true
             }
@@ -335,12 +446,14 @@ class PostViewModel @Inject constructor(
     fun jumpToFloor(floor: Int) {
         val normalized = floor.coerceIn(0, _totalRows.value.coerceAtLeast(0))
         _targetFloor.value = normalized
+        savedStateHandle["readingFloor"] = normalized
         load(normalized / 30 + 1)
     }
 
     fun goToPage(page: Int) {
         val target = page.coerceIn(1, _totalPages.value.coerceAtLeast(1))
         _targetFloor.value = (target - 1) * 30
+        savedStateHandle["readingFloor"] = (target - 1) * 30
         load(target)
     }
 
@@ -355,17 +468,66 @@ class PostViewModel @Inject constructor(
     }
 
     fun updateReadFloor(floor: Int) {
-        viewModelScope.launch { repo.updateHistoryFloor(tid, floor) }
+        savedStateHandle["readingFloor"] = floor.coerceAtLeast(0)
+        viewModelScope.launch {
+            session?.let { repo.updateHistoryFloor(tid, floor, it) }
+        }
     }
 
     fun toggleFavorite() {
+        if (favoriteBusy) return
+        val add = !_favorite.value
+        retryFavoriteAdd = null
+        _favoriteError.value = null
+        mutateFavorite(add)
+    }
+
+    fun retryFavorite() {
+        if (favoriteBusy) return
+        val add = retryFavoriteAdd ?: return
+        favoriteBusy = true
         viewModelScope.launch {
-            if (_favorite.value) {
-                repo.removeFavorite(tid)
-                _favorite.value = false
-            } else {
-                repo.addFavorite(tid, _subject.value, threadFid, threadAuthor)
-                _favorite.value = true
+            try {
+                val owner = session ?: return@launch
+                if (!repo.isSessionCurrent(owner)) return@launch
+                val result = repo.retryServerFavorite(tid, add, owner)
+                result.onSuccess {
+                    retryFavoriteAdd = null
+                    _favoriteError.value = null
+                }.onFailure {
+                    if (it is CancellationException) throw it
+                    _favoriteError.value = it.message ?: "同步 NGA 收藏失败"
+                }
+            } finally {
+                favoriteBusy = false
+            }
+        }
+    }
+
+    fun dismissFavoriteError() {
+        _favoriteError.value = null
+        retryFavoriteAdd = null
+    }
+
+    private fun mutateFavorite(add: Boolean) {
+        favoriteBusy = true
+        viewModelScope.launch {
+            try {
+                val owner = session ?: return@launch
+                if (!repo.isSessionCurrent(owner)) return@launch
+                val result = if (add) repo.addFavorite(tid, _subject.value, threadFid, threadAuthor, owner)
+                    else repo.removeFavorite(tid, owner)
+                _favorite.value = add
+                result.onSuccess {
+                    _favoriteError.value = null
+                    retryFavoriteAdd = null
+                }.onFailure { error ->
+                    if (error is CancellationException) throw error
+                    retryFavoriteAdd = add
+                    _favoriteError.value = error.message ?: "同步 NGA 收藏失败"
+                }
+            } finally {
+                favoriteBusy = false
             }
         }
     }
@@ -397,6 +559,12 @@ class PostViewModel @Inject constructor(
     }
 
     private val draftKey: String get() = "reply:$tid"
+
+    private companion object {
+        // The last edit may be queued as navigation disposes the ViewModel.
+        // Bounded draft jobs finish in this process scope; they carry a fixed account session.
+        val draftScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    }
 }
 
 internal fun Post.renderKey(): String = pid.ifBlank { "floor-$lou" }

@@ -1,17 +1,20 @@
 package com.qingyi5427.ngaqing.data.remote
 
+import com.qingyi5427.ngaqing.data.local.RequestPreferences
 import retrofit2.http.Field
 import retrofit2.http.FormUrlEncoded
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Query
+import retrofit2.http.Tag
 
 interface NgaApi {
     @GET("app_api.php")
     suspend fun homeCategory(
         @Query("__lib") lib: String = "home",
         @Query("__act") act: String = "category",
-        @Query("__output") output: Int = 8
+        @Query("__output") output: Int = 8,
+        @Tag session: RequestPreferences? = null
     ): String
 
     @GET("thread.php")
@@ -25,7 +28,8 @@ interface NgaApi {
         @Query("recommend") recommend: Int? = null,
         @Query("order_by") orderBy: String? = null,
         @Query("user") user: Int? = null,
-        @Query("favor") favor: Int? = null
+        @Query("favor") favor: Int? = null,
+        @Tag session: RequestPreferences? = null
     ): String
 
     @GET("read.php")
@@ -35,7 +39,8 @@ interface NgaApi {
         @Query("__output") output: Int = 8,
         @Query("noprefix") noprefix: String = "",
         @Query("v2") v2: String = "",
-        @Query("authorid") authorId: String? = null
+        @Query("authorid") authorId: String? = null,
+        @Tag session: RequestPreferences? = null
     ): String
 
     @GET("forum.php")
@@ -43,7 +48,8 @@ interface NgaApi {
         @Query("__output") output: Int = 8,
         @Query("key") key: String,
         @Query("fid") fid: String? = null,
-        @Query("stid") stid: String? = null
+        @Query("stid") stid: String? = null,
+        @Tag session: RequestPreferences? = null
     ): String
 
     /** 发回复：post.php?__lib=post&__act=reply */
@@ -57,7 +63,8 @@ interface NgaApi {
         @Field("fid") fid: String,
         @Field("tid") tid: String,
         @Field("content") content: String,
-        @Field("step") step: Int = 1
+        @Field("step") step: Int = 1,
+        @Tag session: RequestPreferences? = null
     ): String
 
     /** NGA 标准发布流程的最终提交；action 支持 new/reply/quote。 */
@@ -73,7 +80,8 @@ interface NgaApi {
         @Query("__inchst") inchst: String = "UTF8",
         @Field("step") step: Int = 2,
         @Field("post_subject") subject: String = "",
-        @Field("post_content") content: String
+        @Field("post_content") content: String,
+        @Tag session: RequestPreferences? = null
     ): String
 
     @GET("nuke.php")
@@ -82,7 +90,8 @@ interface NgaApi {
         @Query("__act") act: String = "get_all",
         @Query("raw") raw: Int = 3,
         @Query("time_limit") since: Long = 0,
-        @Query("__output") output: Int = 8
+        @Query("__output") output: Int = 8,
+        @Tag session: RequestPreferences? = null
     ): String
 
     @GET("nuke.php")
@@ -91,7 +100,8 @@ interface NgaApi {
         @Query("__act") act: String = "message",
         @Query("action") action: String = "list",
         @Query("page") page: Int = 1,
-        @Query("__output") output: Int = 8
+        @Query("__output") output: Int = 8,
+        @Tag session: RequestPreferences? = null
     ): String
 
     @GET("nuke.php")
@@ -99,7 +109,8 @@ interface NgaApi {
         @Query("__lib") lib: String = "ucp",
         @Query("__act") act: String = "get",
         @Query("uid") uid: String,
-        @Query("__output") output: Int = 8
+        @Query("__output") output: Int = 8,
+        @Tag session: RequestPreferences? = null
     ): String
 
     @GET("nuke.php")
@@ -108,7 +119,8 @@ interface NgaApi {
         @Query("__act") act: String = "load_topic_by_uid",
         @Query("uid") uid: String,
         @Query("page") page: Int = 1,
-        @Query("__output") output: Int = 8
+        @Query("__output") output: Int = 8,
+        @Tag session: RequestPreferences? = null
     ): String
 
     @FormUrlEncoded
@@ -118,7 +130,8 @@ interface NgaApi {
         @Query("__act") act: String = "follow",
         @Field("type") type: Int,
         @Field("id") id: String,
-        @Query("__output") output: Int = 8
+        @Query("__output") output: Int = 8,
+        @Tag session: RequestPreferences? = null
     ): String
 
     @FormUrlEncoded
@@ -130,7 +143,8 @@ interface NgaApi {
         @Field("folder") folder: Int = 1,
         @Field("tid") tid: String,
         @Field("pid") pid: String = "",
-        @Query("__output") output: Int = 8
+        @Query("__output") output: Int = 8,
+        @Tag session: RequestPreferences? = null
     ): String
 
     @FormUrlEncoded
@@ -143,6 +157,7 @@ interface NgaApi {
         @Field("tid") tid: String,
         @Field("page") page: Int = 1,
         @Field("tidarray") tidArray: String,
-        @Query("__output") output: Int = 8
+        @Query("__output") output: Int = 8,
+        @Tag session: RequestPreferences? = null
     ): String
 }

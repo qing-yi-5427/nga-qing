@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import kotlin.coroutines.resume
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -28,11 +29,32 @@ internal fun parseNgaPassportCookies(raw: String): NgaPassportCookies {
             "ngaPassportCid" -> cids += kv[1]
         }
     }
-    return NgaPassportCookies(
-        uid = uids.firstOrNull { value -> value.all(Char::isDigit) }.orEmpty(),
-        cid = cids.maxByOrNull(String::length).orEmpty()
-    )
+    val accountUids = uids.filter { it.isNotEmpty() && it.all(Char::isDigit) }.distinct()
+    val accountCids = cids.distinct()
+    return if (accountUids.size == 1 && accountCids.size == 1) {
+        NgaPassportCookies(accountUids.single(), accountCids.single())
+    } else {
+        NgaPassportCookies()
+    }
 }
+
+/** A redirected WebView URL is eligible only when it is an exact HTTPS forum origin. */
+internal fun loginCaptureUrls(extraUrls: List<String>): List<String> =
+    extraUrls.mapNotNull { value ->
+        value.toHttpUrlOrNull()?.takeIf(NgaAuthPolicy::isLoginUrl)?.let { url ->
+            url.newBuilder().query(null).fragment(null).build().toString()
+        }
+    }.distinct()
+
+internal fun hasConflictingPassportCookies(raw: String, uid: String, cid: String): Boolean =
+    raw.split(";").any { part ->
+        val pair = part.trim().split("=", limit = 2)
+        pair.size == 2 && when (pair[0]) {
+            "ngaPassportUid" -> pair[1].all(Char::isDigit) && pair[1] != uid
+            "ngaPassportCid" -> pair[1] != cid
+            else -> false
+        }
+    }
 
 /**
  * Reads NGA passport cookies from the system CookieManager after the user logs in
@@ -46,6 +68,7 @@ internal fun parseNgaPassportCookies(raw: String): NgaPassportCookies {
 class LoginHelper @Inject constructor(
     private val prefs: UserPreferences
 ) {
+    private val transactions = AuthTransactionRunner()
 
     /** Hosts that may hold the NGA passport cookies. */
     private val hosts = NgaDomains.options.map { NgaDomains.origin(it.host) }
@@ -71,25 +94,29 @@ class LoginHelper @Inject constructor(
      *   page, which may differ from the hardcoded hosts after redirects).
      * @return true if valid uid + cid cookies were found and saved.
      */
-    suspend fun captureAndSave(extraUrls: List<String> = emptyList()): Boolean = withContext(Dispatchers.IO) {
-        val cm = CookieManager.getInstance()
-        // Ensure the WebView's in-memory cookies are flushed/synced before reading.
-        runCatching { cm.flush() }
-        var uid = ""
-        var cid = ""
-        for (url in (hosts + extraUrls).distinct()) {
-            val cookie = cm.getCookie(url) ?: continue
-            val parsed = parseNgaPassportCookies(cookie)
-            if (parsed.uid.isNotBlank()) uid = parsed.uid
-            if (parsed.cid.isNotBlank()) cid = parsed.cid
-            if (uid.isNotBlank() && cid.isNotBlank()) break
-        }
-        if (uid.isNotBlank() && cid.isNotBlank()) {
-            prefs.saveAuth(uid, cid, "")
-            syncCookiesToWebView(uid, cid)
-            true
-        } else {
-            false
+    suspend fun captureAndSave(extraUrls: List<String> = emptyList()): Boolean {
+        val expectedRevision = prefs.requestPreferences().revision
+        return transactions.run {
+            if (prefs.requestPreferences().revision != expectedRevision) return@run false
+            val cm = CookieManager.getInstance()
+            // Ensure the WebView's in-memory cookies are flushed/synced before reading.
+            runCatching { cm.flush() }
+            var captured = NgaPassportCookies()
+            for (url in (loginCaptureUrls(extraUrls) + hosts).distinct()) {
+                val cookie = cm.getCookie(url) ?: continue
+                val parsed = parseNgaPassportCookies(cookie)
+                if (parsed.uid.isNotBlank() && parsed.cid.isNotBlank()) {
+                    captured = parsed
+                    break
+                }
+            }
+            if (captured.uid.isNotBlank() && captured.cid.isNotBlank()) {
+                prefs.saveAuth(captured.uid, captured.cid, "")
+                replaceCookiesWithCurrentAccount(cm)
+                true
+            } else {
+                false
+            }
         }
     }
 
@@ -97,25 +124,77 @@ class LoginHelper @Inject constructor(
      * 从持久化存储里把 passport cookie 同步回系统 CookieManager。
      * 在 Application / Activity 启动时调用，保证杀进程重进后 WebView 图片仍能带 cookie。
      */
-    suspend fun syncAuthCookies(): Unit = withContext(Dispatchers.IO) {
-        val uid = prefs.uid.first()
-        val cid = prefs.cid.first()
-        if (uid.isNotBlank() && cid.isNotBlank()) {
-            syncCookiesToWebView(uid, cid)
-        }
+    suspend fun syncAuthCookies(): Unit = transactions.run {
+        replaceCookiesWithCurrentAccount(CookieManager.getInstance())
     }
 
     /** 同时清除原生请求凭证与 WebView cookie，避免退出后被旧 cookie 自动登录。 */
-    suspend fun clearAuth(): Unit = withContext(Dispatchers.IO) {
+    suspend fun clearAuth() = transactions.run {
+        // Logout wins over any login capture queued before it. Captures queued behind
+        // logout see the changed revision and cannot restore the old account.
         prefs.clearAuth()
-        val cm = CookieManager.getInstance()
-        cm.removeAllCookies(null)
-        runCatching { cm.flush() }
+        removeCookies(CookieManager.getInstance())
     }
 
     /** 为添加另一个账号清理网页会话，但保留 DataStore 中已有的账号列表。 */
-    suspend fun prepareAdditionalLogin(): Unit = withContext(Dispatchers.IO) {
-        val cm = CookieManager.getInstance()
+    suspend fun prepareAdditionalLogin() {
+        val expectedRevision = prefs.requestPreferences().revision
+        transactions.run {
+            if (prefs.requestPreferences().revision != expectedRevision) return@run
+            removeCookies(CookieManager.getInstance())
+        }
+    }
+
+    /** Switch the active identity and all WebView cookies as one serialized operation. */
+    suspend fun switchAccount(uid: String): Boolean {
+        val expectedRevision = prefs.requestPreferences().revision
+        return transactions.run {
+            if (prefs.requestPreferences().revision != expectedRevision) return@run false
+            val switched = prefs.switchAccount(uid)
+            if (switched) replaceCookiesWithCurrentAccount(CookieManager.getInstance())
+            switched
+        }
+    }
+
+    /** Remove an account and finish fallback selection and cookie sync before returning. */
+    suspend fun removeAccount(uid: String) {
+        val expectedRevision = prefs.requestPreferences().revision
+        transactions.run {
+            val current = prefs.requestPreferences()
+            if (current.revision != expectedRevision) return@run
+            val wasActive = current.uid == uid
+            prefs.removeAccount(uid)
+            if (wasActive) {
+                prefs.accounts.first().firstOrNull()?.let { next ->
+                    prefs.switchAccount(next.uid)
+                }
+            }
+            replaceCookiesWithCurrentAccount(CookieManager.getInstance())
+        }
+    }
+
+    private suspend fun replaceCookiesWithCurrentAccount(cm: CookieManager) {
+        // Preserve WAF/captcha cookies while the account is unchanged. A conflicting old
+        // passport needs a full reset because WebView does not expose cookie Path/Domain
+        // attributes needed to delete every old variant safely.
+        repeat(3) {
+            val account = prefs.requestPreferences()
+            val conflicting = cookieHosts.any { url ->
+                cm.getCookie(url)?.let { raw ->
+                    hasConflictingPassportCookies(raw, account.uid, account.cid)
+                } ?: false
+            }
+            if (conflicting) removeCookies(cm)
+            if (account.uid.isNotBlank() && account.cid.isNotBlank()) {
+                syncCookiesToWebView(account.uid, account.cid)
+            }
+            if (prefs.requestPreferencesOrNull()?.revision == account.revision) return
+            removeCookies(cm)
+        }
+        removeCookies(cm)
+    }
+
+    private suspend fun removeCookies(cm: CookieManager) {
         withContext(Dispatchers.Main.immediate) {
             suspendCancellableCoroutine { continuation ->
                 cm.removeAllCookies {

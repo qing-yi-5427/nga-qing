@@ -85,13 +85,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -159,12 +162,12 @@ fun PostScreen(
     val scope = rememberCoroutineScope()
 
     val viewerUrl = remember { mutableStateOf<String?>(null) }
-    val webFallback = remember { mutableStateOf(false) }
+    val webFallback = rememberSaveable { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val ctx = LocalContext.current
 
-    var replyOpen by remember { mutableStateOf(false) }
-    var replyText by remember { mutableStateOf("") }
+    var replyOpen by rememberSaveable { mutableStateOf(false) }
+    var replyText by rememberSaveable { mutableStateOf("") }
     var menuOpen by remember { mutableStateOf(false) }
     var jumpOpen by remember { mutableStateOf(false) }
     var jumpText by remember { mutableStateOf("") }
@@ -175,28 +178,43 @@ fun PostScreen(
     var suppressQuickActionScroll by remember { mutableStateOf(false) }
     val replying by viewModel.replying.collectAsStateWithLifecycle()
     val replyResult by viewModel.replyResult.collectAsStateWithLifecycle()
+    val replySucceeded by viewModel.replySucceeded.collectAsStateWithLifecycle()
+    val favoriteError by viewModel.favoriteError.collectAsStateWithLifecycle()
 
     LaunchedEffect(webFallback.value, ngaDomain) {
         if (webFallback.value) viewModel.prepareWebCookies()
     }
 
+    if (favoriteError != null) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissFavoriteError,
+            title = { Text("收藏同步失败") },
+            text = { Text(favoriteError.orEmpty()) },
+            confirmButton = {
+                TextButton(onClick = viewModel::retryFavorite) { Text("重试同步") }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismissFavoriteError) { Text("稍后处理") }
+            }
+        )
+    }
+
     // 回复结果提示
-    LaunchedEffect(replyResult) {
+    LaunchedEffect(replyResult, replySucceeded) {
         replyResult?.let {
             Toast.makeText(ctx, it, Toast.LENGTH_LONG).show()
-            viewModel.consumeReplyResult()
-            if (it.contains("成功")) {
+            if (replySucceeded) {
                 replyOpen = false
                 replyText = ""
             }
+            viewModel.consumeReplyResult()
         }
     }
 
-    // 只在编辑器打开时防抖保存，避免初始空状态覆盖磁盘上的旧草稿。
-    LaunchedEffect(replyOpen, replyText, replyTarget) {
-        if (!replyOpen) return@LaunchedEffect
-        delay(600)
-        viewModel.saveDraft(replyText)
+    val latestReplyOpen by rememberUpdatedState(replyOpen)
+    val latestReplyText by rememberUpdatedState(replyText)
+    DisposableEffect(Unit) {
+        onDispose { if (latestReplyOpen) viewModel.saveDraft(latestReplyText, immediate = true) }
     }
 
     // 滚到底部附近自动加载下一页（无限滚动）
@@ -662,7 +680,12 @@ fun PostScreen(
     // 可展开的回复编辑器：为键盘、长文本和后续引用/图片工具栏预留空间。
     if (replyOpen) {
         ModalBottomSheet(
-            onDismissRequest = { if (!replying) replyOpen = false },
+            onDismissRequest = {
+                if (!replying) {
+                    viewModel.saveDraft(replyText, immediate = true)
+                    replyOpen = false
+                }
+            },
             containerColor = MaterialTheme.colorScheme.surface
         ) {
             Column(
@@ -680,7 +703,10 @@ fun PostScreen(
                         overflow = TextOverflow.Ellipsis
                     )
                     Spacer(Modifier.weight(1f))
-                    TextButton(onClick = { replyOpen = false }, enabled = !replying) {
+                    TextButton(onClick = {
+                        viewModel.saveDraft(replyText, immediate = true)
+                        replyOpen = false
+                    }, enabled = !replying) {
                         Text("取消")
                     }
                     TextButton(
@@ -696,7 +722,10 @@ fun PostScreen(
                 }
                 OutlinedTextField(
                     value = replyText,
-                    onValueChange = { replyText = it },
+                    onValueChange = {
+                        replyText = it
+                        viewModel.saveDraft(it)
+                    },
                     placeholder = { Text("写下你的回复……") },
                     minLines = 8,
                     maxLines = 14,
@@ -704,6 +733,7 @@ fun PostScreen(
                 )
                 TextButton(
                     onClick = {
+                        viewModel.saveDraft(replyText, immediate = true)
                         replyOpen = false
                         nav.navigate(
                             Routes.webReplyRoute(
@@ -1482,9 +1512,7 @@ private fun WebPageView(tid: String, ngaDomain: String) {
                 settings.loadsImagesAutomatically = true
                 settings.blockNetworkImage = false
                 settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                // 创建时清掉旧的未登录页面，但之后允许脚本/图片正常缓存；
-                // LOAD_NO_CACHE 会让网页滚动期间的资源复用明显变差。
-                clearCache(true)
+                // 回退页沿用正常缓存，避免首次加载时额外清空共享 WebView 缓存。
                 settings.cacheMode = WebSettings.LOAD_DEFAULT
                 settings.useWideViewPort = true
                 settings.loadWithOverviewMode = true

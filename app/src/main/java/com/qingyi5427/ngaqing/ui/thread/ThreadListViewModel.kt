@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.qingyi5427.ngaqing.data.model.ThreadItem
 import com.qingyi5427.ngaqing.data.model.Board
 import com.qingyi5427.ngaqing.data.repository.NgaRepository
+import com.qingyi5427.ngaqing.data.local.RequestPreferences
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -15,6 +16,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import javax.inject.Inject
 
 sealed interface ThreadUiState {
@@ -65,6 +68,8 @@ class ThreadListViewModel @Inject constructor(
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
     private val _isFavoriteBoard = MutableStateFlow(false)
     val isFavoriteBoard: StateFlow<Boolean> = _isFavoriteBoard.asStateFlow()
+    private val _headerVisible = MutableStateFlow(savedStateHandle.get<Boolean>(HEADER_VISIBLE) ?: true)
+    val headerVisible: StateFlow<Boolean> = _headerVisible.asStateFlow()
     val initialScrollIndex: Int get() = savedStateHandle[SCROLL_INDEX] ?: 0
     val initialScrollOffset: Int get() = savedStateHandle[SCROLL_OFFSET] ?: 0
     val visitedTids = repo.history().map { items -> items.mapTo(mutableSetOf()) { it.tid } }
@@ -72,18 +77,29 @@ class ThreadListViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow<ThreadUiState>(ThreadUiState.Loading)
     val uiState: StateFlow<ThreadUiState> = _uiState.asStateFlow()
+    private var fetchJob: Job? = null
+    private var fetchGeneration = 0L
+    private var session: RequestPreferences? = null
+    private var favoriteBusy = false
 
     init {
-        viewModelScope.launch { _isFavoriteBoard.value = repo.isFavoriteBoard(fid, stid) }
+        viewModelScope.launch {
+            val owner = repo.captureSession()
+            session = owner
+            _isFavoriteBoard.value = repo.isFavoriteBoard(fid, stid, owner)
+        }
         loadInitial()
     }
 
     /** 加载第一页并清空已累积的列表（进入版块、切换只看楼主时调用）。 */
     fun loadInitial(showLoading: Boolean = true) {
+        fetchJob?.cancel()
+        fetchGeneration++
         _page.value = 1
+        _isRefreshing.value = !showLoading
         if (showLoading) _threads.value = emptyList()
         if (showLoading) _uiState.value = ThreadUiState.Loading else _isRefreshing.value = true
-        fetch(1)
+        fetch(1, null)
     }
 
     fun refresh() = loadInitial(showLoading = false)
@@ -92,22 +108,32 @@ class ThreadListViewModel @Inject constructor(
     fun loadMore() {
         val cur = _uiState.value
         if (cur !is ThreadUiState.Success) return
-        if (cur.isLoadingMore) return
+        if (cur.isLoadingMore || _isRefreshing.value) return
         if (cur.page >= cur.totalPages) return
         _uiState.value = cur.copy(isLoadingMore = true, loadError = null)
-        fetch(cur.page + 1)
+        fetch(cur.page + 1, cur)
     }
 
-    private fun fetch(page: Int) {
-        viewModelScope.launch {
-            val result = repo.getThreads(
+    private fun fetch(page: Int, base: ThreadUiState.Success?) {
+        fetchJob?.cancel()
+        val generation = ++fetchGeneration
+        val authorId = _onlyAuthor.value
+        val recommendedOnly = _recommendedOnly.value
+        val sortByPostDate = _sort.value == ThreadSort.POST_DATE
+        fetchJob = viewModelScope.launch {
+            val result = try {
+                repo.getThreads(
                 fid = fid,
                 stid = stid,
                 page = page,
-                authorId = _onlyAuthor.value,
-                recommendedOnly = _recommendedOnly.value,
-                sortByPostDate = _sort.value == ThreadSort.POST_DATE
-            )
+                authorId = authorId,
+                recommendedOnly = recommendedOnly,
+                sortByPostDate = sortByPostDate
+                )
+            } catch (e: CancellationException) {
+                throw e
+            }
+            if (generation != fetchGeneration) return@launch
             if (result.error != null) {
                 _isRefreshing.value = false
                 if (page == 1) {
@@ -122,19 +148,18 @@ class ThreadListViewModel @Inject constructor(
                 return@launch
             }
             val tp = if (result.totalRows > 0) ((result.totalRows + 29) / 30).coerceAtLeast(1) else 1
-            val combined = (if (page == 1) result.threads else (_threads.value + result.threads))
+            val combined = (if (page == 1) result.threads else (base?.threads.orEmpty() + result.threads))
                 .distinctBy { it.tid }
             _threads.value = combined
             if (page == 1) _subBoards.value = result.subBoards
             _page.value = page
             _totalPages.value = tp
-            val previous = _uiState.value as? ThreadUiState.Success
             _uiState.value = ThreadUiState.Success(
                 threads = combined,
-                subBoards = if (page == 1) result.subBoards else previous?.subBoards.orEmpty(),
+                subBoards = if (page == 1) result.subBoards else base?.subBoards.orEmpty(),
                 page = page,
                 totalPages = tp,
-                recommendedOnly = _recommendedOnly.value,
+                recommendedOnly = recommendedOnly,
                 fromCache = result.fromCache,
                 isLoadingMore = false,
                 loadError = null
@@ -167,14 +192,28 @@ class ThreadListViewModel @Inject constructor(
 
     fun resetScrollPosition() = saveScrollPosition(0, 0)
 
+    fun setHeaderVisible(visible: Boolean) {
+        if (_headerVisible.value == visible) return
+        _headerVisible.value = visible
+        savedStateHandle[HEADER_VISIBLE] = visible
+    }
+
     fun toggleFavoriteBoard() {
+        if (favoriteBusy) return
+        favoriteBusy = true
         viewModelScope.launch {
-            if (_isFavoriteBoard.value) {
-                repo.removeFavoriteBoard(fid, stid)
-                _isFavoriteBoard.value = false
-            } else {
-                repo.addFavoriteBoard(fid, stid, name)
-                _isFavoriteBoard.value = true
+            try {
+                val owner = session ?: return@launch
+                if (!repo.isSessionCurrent(owner)) return@launch
+                if (_isFavoriteBoard.value) {
+                    repo.removeFavoriteBoard(fid, stid, owner)
+                    _isFavoriteBoard.value = false
+                } else {
+                    repo.addFavoriteBoard(fid, stid, name, session = owner)
+                    _isFavoriteBoard.value = true
+                }
+            } finally {
+                favoriteBusy = false
             }
         }
     }
@@ -184,5 +223,6 @@ class ThreadListViewModel @Inject constructor(
     private companion object {
         const val SCROLL_INDEX = "thread_scroll_index"
         const val SCROLL_OFFSET = "thread_scroll_offset"
+        const val HEADER_VISIBLE = "thread_header_visible"
     }
 }

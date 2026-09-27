@@ -12,6 +12,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import android.util.Log
 import javax.inject.Inject
 
 sealed interface LoginState {
@@ -52,7 +57,15 @@ class LoginViewModel @Inject constructor(
     }
 
     fun restoreSavedCookies() {
-        viewModelScope.launch { loginHelper.syncAuthCookies() }
+        restoreScope.launch {
+            try {
+                loginHelper.syncAuthCookies()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("NgaLogin", "恢复账号 Cookie 失败", e)
+            }
+        }
     }
 
     /**
@@ -88,5 +101,10 @@ class LoginViewModel @Inject constructor(
                 _state.value = LoginState.Error("未检测到登录凭证：请先在网页里扫码登录，扫码成功后点右上角「刷新」，再点「完成登录」")
             }
         }
+    }
+
+    private companion object {
+        // A disposed add-account screen still has to restore the saved account's cookies.
+        val restoreScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     }
 }

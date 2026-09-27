@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.qingyi5427.ngaqing.data.model.BoardGroup
 import com.qingyi5427.ngaqing.data.model.Board
 import com.qingyi5427.ngaqing.data.repository.NgaRepository
+import com.qingyi5427.ngaqing.data.local.RequestPreferences
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -13,6 +14,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import javax.inject.Inject
 
 sealed interface BoardUiState {
@@ -33,17 +35,27 @@ class BoardViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+    private var loadJob: Job? = null
+    private var generation = 0L
+    private var session: RequestPreferences? = null
 
     val initialScrollIndex: Int get() = savedStateHandle[SCROLL_INDEX] ?: 0
     val initialScrollOffset: Int get() = savedStateHandle[SCROLL_OFFSET] ?: 0
 
-    init { load() }
+    init {
+        viewModelScope.launch { session = repo.captureSession() }
+        load()
+    }
 
     fun load(showLoading: Boolean = true) {
-        if (showLoading) _uiState.value = BoardUiState.Loading else _isRefreshing.value = true
-        viewModelScope.launch {
+        loadJob?.cancel()
+        val request = ++generation
+        _isRefreshing.value = !showLoading
+        if (showLoading) _uiState.value = BoardUiState.Loading
+        loadJob = viewModelScope.launch {
             repo.getCategory()
                 .onSuccess { groups ->
+                    if (request != generation) return@onSuccess
                     if (groups.isEmpty()) {
                         if (showLoading || _uiState.value !is BoardUiState.Success) {
                             _uiState.value = BoardUiState.Error(null, "未解析到版块，请查看原始数据")
@@ -54,6 +66,7 @@ class BoardViewModel @Inject constructor(
                     _isRefreshing.value = false
                 }
                 .onFailure { e ->
+                    if (request != generation) return@onFailure
                     if (showLoading || _uiState.value !is BoardUiState.Success) {
                         _uiState.value = BoardUiState.Error(null, e.message ?: "加载失败")
                     }
@@ -70,7 +83,9 @@ class BoardViewModel @Inject constructor(
     }
 
     fun reorderFavoriteBoards(boards: List<Board>) {
-        viewModelScope.launch { repo.reorderFavoriteBoards(boards) }
+        viewModelScope.launch {
+            session?.let { repo.reorderFavoriteBoards(boards, it) }
+        }
     }
 
     private companion object {
@@ -79,8 +94,10 @@ class BoardViewModel @Inject constructor(
     }
 }
 
-internal fun favoriteBoardKey(board: Board): String =
-    board.stid?.takeIf { it.isNotBlank() }?.let { "stid:$it" } ?: "fid:${board.fid}"
+internal fun boardIdentityKey(fid: String, stid: String?): String =
+    stid?.takeIf { it.isNotBlank() }?.let { "stid:$it" } ?: "fid:$fid"
+
+internal fun favoriteBoardKey(board: Board): String = boardIdentityKey(board.fid, board.stid)
 
 internal fun moveFavoriteBoard(
     boards: List<Board>,

@@ -61,6 +61,8 @@ fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hilt
     val folders by viewModel.folders.collectAsStateWithLifecycle()
     val syncing by viewModel.syncing.collectAsStateWithLifecycle()
     val syncMessage by viewModel.syncMessage.collectAsStateWithLifecycle()
+    val syncError by viewModel.syncError.collectAsStateWithLifecycle()
+    val actionError by viewModel.actionError.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var pendingDelete by remember { mutableStateOf<FavoriteEntity?>(null) }
     var pendingMove by remember { mutableStateOf<FavoriteEntity?>(null) }
@@ -73,6 +75,27 @@ fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hilt
             android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show()
             viewModel.consumeSyncMessage()
         }
+    }
+    if (syncError != null) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissSyncError,
+            title = { Text("收藏同步失败") },
+            text = { Text(syncError.orEmpty()) },
+            confirmButton = { TextButton(onClick = {
+                viewModel.dismissSyncError()
+                viewModel.syncFromServer()
+            }) { Text("重试") } },
+            dismissButton = { TextButton(onClick = viewModel::dismissSyncError) { Text("稍后处理") } }
+        )
+    }
+    if (actionError != null) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissActionError,
+            title = { Text("收藏删除未同步") },
+            text = { Text(actionError.orEmpty()) },
+            confirmButton = { TextButton(onClick = viewModel::retryFavorite) { Text("重试同步") } },
+            dismissButton = { TextButton(onClick = viewModel::dismissActionError) { Text("稍后处理") } }
+        )
     }
     Column(Modifier.fillMaxSize()) {
         AppTopBar("收藏", actions = {

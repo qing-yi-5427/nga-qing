@@ -34,7 +34,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
-import com.qingyi5427.ngaqing.ui.Routes
 import com.qingyi5427.ngaqing.ui.chrome.AppTopBar
 import com.qingyi5427.ngaqing.data.local.NgaDomains
 
@@ -51,18 +50,10 @@ fun LoginScreen(
     var loading by remember { mutableStateOf(true) }
     var webView by remember { mutableStateOf<WebView?>(null) }
 
-    LaunchedEffect(addingAccount) {
-        viewModel.prepareLogin(addingAccount)
-    }
+    LaunchedEffect(addingAccount) { viewModel.prepareLogin(addingAccount) }
     DisposableEffect(addingAccount) {
         onDispose {
             if (addingAccount) viewModel.restoreSavedCookies()
-        }
-    }
-    LaunchedEffect(state) {
-        if (state is LoginState.Success) {
-            if (addingAccount) nav.popBackStack()
-            else nav.navigate(Routes.BOARDS) { popUpTo(Routes.LOGIN) { inclusive = true } }
         }
     }
 

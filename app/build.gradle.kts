@@ -89,6 +89,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.navigation:navigation-compose:$navVersion")
+    implementation("androidx.window:window:1.4.0")
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
     kapt("androidx.room:room-compiler:$roomVersion")
@@ -109,5 +110,12 @@ dependencies {
 
     kaptTest("com.google.dagger:hilt-compiler:$hiltVersion")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("com.squareup.okhttp3:mockwebserver:$okhttpVersion")
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("androidx.room:room-testing:$roomVersion")
+    testImplementation("androidx.test:core:1.6.1")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+    testImplementation("androidx.arch.core:core-testing:2.2.0")
+    testImplementation("io.mockk:mockk:1.13.13")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

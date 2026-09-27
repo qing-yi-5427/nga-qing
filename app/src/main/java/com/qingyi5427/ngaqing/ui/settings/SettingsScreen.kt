@@ -250,7 +250,6 @@ fun SettingsScreen(nav: NavHostController, viewModel: SettingsViewModel = hiltVi
                 TextButton(onClick = {
                     confirmLogout = false
                     viewModel.logout()
-                    nav.navigate(Routes.LOGIN) { popUpTo(0) }
                 }) { Text("退出", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = { TextButton(onClick = { confirmLogout = false }) { Text("取消") } }

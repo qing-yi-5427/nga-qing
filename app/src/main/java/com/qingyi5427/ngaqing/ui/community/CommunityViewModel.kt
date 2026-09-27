@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.qingyi5427.ngaqing.data.local.WatchedThreadEntity
 import com.qingyi5427.ngaqing.data.model.CommunityItem
 import com.qingyi5427.ngaqing.data.repository.NgaRepository
+import com.qingyi5427.ngaqing.data.local.RequestPreferences
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -12,6 +13,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import javax.inject.Inject
 
 sealed interface CommunityState {
@@ -35,23 +37,35 @@ class CommunityViewModel @Inject constructor(
         SharingStarted.WhileSubscribed(5_000),
         emptyList()
     )
+    private var requestJob: Job? = null
+    private var generation = 0L
+    private var session: RequestPreferences? = null
 
-    init { refresh() }
+    init {
+        viewModelScope.launch { session = repo.captureSession() }
+        refresh()
+    }
 
     fun select(tab: CommunityTab) {
+        requestJob?.cancel()
+        generation++
         _tab.value = tab
         if (tab != CommunityTab.WATCHING) refresh()
     }
 
     fun refresh() {
         if (_tab.value == CommunityTab.WATCHING) return
+        requestJob?.cancel()
+        val request = ++generation
+        val selectedTab = _tab.value
         _state.value = CommunityState.Loading
-        viewModelScope.launch {
-            val result = if (_tab.value == CommunityTab.NOTIFICATIONS) {
+        requestJob = viewModelScope.launch {
+            val result = if (selectedTab == CommunityTab.NOTIFICATIONS) {
                 repo.notifications()
             } else {
                 repo.privateMessages()
             }
+            if (request != generation) return@launch
             _state.value = result.fold(
                 onSuccess = { CommunityState.Content(it) },
                 onFailure = { CommunityState.Error(it.message ?: "加载失败") }
@@ -60,6 +74,6 @@ class CommunityViewModel @Inject constructor(
     }
 
     fun unwatch(item: WatchedThreadEntity) {
-        viewModelScope.launch { repo.unwatchThread(item.tid) }
+        viewModelScope.launch { session?.let { repo.unwatchThread(item.tid, it) } }
     }
 }

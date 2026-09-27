@@ -2,6 +2,7 @@ package com.qingyi5427.ngaqing.ui.chrome
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Forum
@@ -30,6 +31,7 @@ private data class TabDef(val route: String, val label: String, val icon: ImageV
 fun AppTopBar(
     title: String,
     onTitleClick: (() -> Unit)? = null,
+    windowInsets: WindowInsets = TopAppBarDefaults.windowInsets,
     navigationIcon: @Composable () -> Unit = {},
     actions: @Composable RowScope.() -> Unit = {}
 ) {
@@ -44,6 +46,7 @@ fun AppTopBar(
         },
         navigationIcon = navigationIcon,
         actions = actions,
+        windowInsets = windowInsets,
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = MaterialTheme.colorScheme.background,
             scrolledContainerColor = MaterialTheme.colorScheme.surfaceVariant
@@ -65,10 +68,12 @@ fun AppBottomBar(nav: NavHostController, currentRoute: String) {
             NavigationBarItem(
                 selected = selected,
                 onClick = {
-                    nav.navigate(tab.route) {
-                        popUpTo(nav.graph.findStartDestination().id) { saveState = true }
-                        launchSingleTop = true
-                        restoreState = true
+                    if (!selected) {
+                        nav.navigate(tab.route) {
+                            popUpTo(nav.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
                     }
                 },
                 icon = { Icon(tab.icon, contentDescription = null) },

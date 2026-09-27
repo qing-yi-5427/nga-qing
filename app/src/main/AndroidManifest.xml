@@ -16,6 +16,7 @@
         android:theme="@style/Theme.NgaQing">
         <activity
             android:name="com.qingyi5427.ngaqing.MainActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density"
             android:exported="true"
             android:theme="@style/Theme.NgaQing">
             <intent-filter>

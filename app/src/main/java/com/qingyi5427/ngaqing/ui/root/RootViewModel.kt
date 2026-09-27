@@ -3,6 +3,7 @@ package com.qingyi5427.ngaqing.ui.root
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.qingyi5427.ngaqing.data.local.UserPreferences
+import com.qingyi5427.ngaqing.data.local.RequestPreferences
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
@@ -17,6 +18,9 @@ class RootViewModel @Inject constructor(
     val isLoggedIn = prefs.isLoggedIn.stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val authState = prefs.isLoggedIn
         .map { loggedIn -> loggedIn as Boolean? }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val authSession = prefs.session
+        .map { it as RequestPreferences? }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val userName = prefs.uname.stateIn(viewModelScope, SharingStarted.Eagerly, "")
     val userId = prefs.uid.stateIn(viewModelScope, SharingStarted.Eagerly, "")

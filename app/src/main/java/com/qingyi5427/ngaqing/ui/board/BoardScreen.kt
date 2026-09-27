@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -45,13 +44,17 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -71,14 +74,19 @@ import kotlinx.coroutines.launch
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-fun BoardScreen(nav: NavHostController, viewModel: BoardViewModel = hiltViewModel()) {
+fun BoardScreen(
+    nav: NavHostController,
+    viewModel: BoardViewModel = hiltViewModel(),
+    showBottomBar: Boolean = true,
+    selectedBoardKey: String? = null,
+    onOpenBoard: (Board) -> Unit = { nav.navigate(Routes.threadRoute(it.fid, it.name, it.stid)) }
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val favoriteBoards by viewModel.favoriteBoards.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
-    val listState = rememberLazyListState(
-        initialFirstVisibleItemIndex = viewModel.initialScrollIndex,
-        initialFirstVisibleItemScrollOffset = viewModel.initialScrollOffset
-    )
+    val listState = remember(viewModel) {
+        LazyListState(viewModel.initialScrollIndex, viewModel.initialScrollOffset)
+    }
     LaunchedEffect(listState) {
         snapshotFlow { listState.isScrollInProgress }
             .distinctUntilChanged()
@@ -120,13 +128,14 @@ fun BoardScreen(nav: NavHostController, viewModel: BoardViewModel = hiltViewMode
                 is BoardUiState.Success -> BoardList(
                     current.groups,
                     favoriteBoards,
+                    selectedBoardKey,
                     listState,
                     viewModel::reorderFavoriteBoards,
-                    nav
+                    onOpenBoard
                 )
             }
         }
-        AppBottomBar(nav, Routes.BOARDS)
+        if (showBottomBar) AppBottomBar(nav, Routes.BOARDS)
     }
 }
 
@@ -134,9 +143,10 @@ fun BoardScreen(nav: NavHostController, viewModel: BoardViewModel = hiltViewMode
 private fun BoardList(
     groups: List<BoardGroup>,
     favoriteBoards: List<Board>,
+    selectedBoardKey: String?,
     listState: LazyListState,
     onFavoriteOrderChanged: (List<Board>) -> Unit,
-    nav: NavHostController
+    onOpenBoard: (Board) -> Unit
 ) {
     val categories = groups.groupBy { it.categoryName }
     var collapsed by rememberSaveable { mutableStateOf(emptySet<String>()) }
@@ -171,6 +181,7 @@ private fun BoardList(
                     BoardRow(
                         board = board,
                         isChild = false,
+                        selected = boardKey == selectedBoardKey,
                         showDragHandle = true,
                         modifier = Modifier
                             .zIndex(if (dragging) 1f else 0f)
@@ -247,7 +258,7 @@ private fun BoardList(
                                 )
                             }
                     ) {
-                        nav.navigate(Routes.threadRoute(board.fid, board.name, board.stid))
+                        onOpenBoard(board)
                     }
                 }
             }
@@ -271,9 +282,10 @@ private fun BoardList(
                         BoardRow(
                             board = parent,
                             isChild = false,
+                            selected = favoriteBoardKey(parent) == selectedBoardKey,
                             expanded = groupExpanded,
                             onToggle = { collapsed = collapsed.toggle(groupKey) },
-                            onClick = { nav.navigate(Routes.threadRoute(parent.fid, parent.name, parent.stid)) }
+                            onClick = { onOpenBoard(parent) }
                         )
                     }
                 } else if (group.groupName != categoryName) {
@@ -286,8 +298,12 @@ private fun BoardList(
 
                 if (groupExpanded) group.children.forEachIndexed { boardIndex, board ->
                     item(key = "board-${board.fid}-${board.stid.orEmpty()}", contentType = "board-row") {
-                        BoardRow(board, isChild = parent != null) {
-                            nav.navigate(Routes.threadRoute(board.fid, board.name, board.stid))
+                        BoardRow(
+                            board,
+                            isChild = parent != null,
+                            selected = favoriteBoardKey(board) == selectedBoardKey
+                        ) {
+                            onOpenBoard(board)
                         }
                         if (boardIndex != group.children.lastIndex) {
                             HorizontalDivider(
@@ -353,18 +369,27 @@ private fun GroupHeader(name: String, expanded: Boolean, onToggle: () -> Unit) {
 private fun BoardRow(
     board: Board,
     isChild: Boolean,
+    selected: Boolean = false,
     expanded: Boolean? = null,
     onToggle: (() -> Unit)? = null,
     showDragHandle: Boolean = false,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+    val colorScheme = MaterialTheme.colorScheme
     Row(
         modifier.fillMaxWidth()
             .background(
-                if (isChild) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.18f)
+                if (selected) colorScheme.secondaryContainer
+                else if (isChild) colorScheme.surfaceVariant.copy(alpha = 0.18f)
                 else Color.Transparent
             )
+            .drawBehind {
+                if (selected) {
+                    drawRect(colorScheme.primary, size = Size(3.dp.toPx(), size.height))
+                }
+            }
+            .semantics { this.selected = selected }
             .clickable(onClick = onClick)
             .padding(
                 start = if (isChild) 30.dp else 20.dp,
@@ -378,7 +403,7 @@ private fun BoardRow(
             Box(
                 Modifier.width(2.dp).height(30.dp)
                     .clip(RoundedCornerShape(2.dp))
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.28f))
+                    .background(colorScheme.primary.copy(alpha = if (selected) 1f else 0.28f))
             )
             Box(Modifier.width(12.dp))
         }
@@ -387,6 +412,8 @@ private fun BoardRow(
             Text(
                 board.name,
                 style = if (isChild) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
+                fontWeight = if (selected) FontWeight.SemiBold else null,
+                color = if (selected) colorScheme.onSecondaryContainer else colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -394,7 +421,8 @@ private fun BoardRow(
                 Text(
                     board.info,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (selected) colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
+                    else colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 2.dp)

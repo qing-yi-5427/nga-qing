@@ -2,8 +2,10 @@ package com.qingyi5427.ngaqing.data.remote
 
 import com.qingyi5427.ngaqing.data.local.UserPreferences
 import com.qingyi5427.ngaqing.data.local.NgaDomains
+import com.qingyi5427.ngaqing.data.local.RequestPreferences
 import kotlinx.coroutines.runBlocking
 import okhttp3.Interceptor
+import okhttp3.Request
 import okhttp3.Response
 import java.io.IOException
 import javax.inject.Inject
@@ -18,16 +20,25 @@ class NgaInterceptor @Inject constructor(
         val request = chain.request()
         // Coil 头像/正文图与 API 复用此客户端。稳定态必须走内存快照，不能让每张图片
         // 都 runBlocking 读取 DataStore；仅应用刚启动、首个快照尚未到达时同步加载一次。
-        val preferences = prefs.requestPreferencesOrNull()
+        val currentPreferences = prefs.requestPreferencesOrNull()
             ?: runBlocking { prefs.requestPreferences() }
-        val uid = preferences.uid
-        val cid = preferences.cid
+        val preferences = request.tag(RequestPreferences::class.java) ?: currentPreferences
+        if (preferences.revision != currentPreferences.revision ||
+            preferences.uid != currentPreferences.uid ||
+            preferences.cid != currentPreferences.cid
+        ) {
+            throw IOException("NGA account changed before request was sent")
+        }
         val host = preferences.ngaDomain
-        if (!NgaDomains.isForumHost(request.url.host)) {
-            return chain.proceed(authenticatedRequest(request, request.url.host, uid, cid))
+        val isSafeRead = request.method == "GET" || request.method == "HEAD"
+        val session = NgaRequestSession(
+            preferences.uid, preferences.cid, preferences.revision,
+            !isSafeRead, NgaAuthPolicy.isTrusted(request.url)
+        )
+        if (!NgaAuthPolicy.isLoginUrl(request.url)) {
+            return chain.proceed(authenticatedRequest(request, request.url.host, session))
         }
 
-        val isSafeRead = request.method == "GET" || request.method == "HEAD"
         val candidates = if (isSafeRead) {
             NgaDomains.failoverHosts(host)
         } else {
@@ -35,7 +46,7 @@ class NgaInterceptor @Inject constructor(
         }
         var lastFailure: IOException? = null
         candidates.forEachIndexed { index, candidate ->
-            val attempt = authenticatedRequest(request, candidate, uid, cid)
+            val attempt = authenticatedRequest(request, candidate, session)
             try {
                 val response = chain.proceed(attempt)
                 val retryServerFailure = response.code in 500..599 && index < candidates.lastIndex
@@ -50,23 +61,24 @@ class NgaInterceptor @Inject constructor(
     }
 
     private fun authenticatedRequest(
-        source: okhttp3.Request,
+        source: Request,
         host: String,
-        uid: String,
-        cid: String
-    ): okhttp3.Request {
-        val selectedUrl = if (NgaDomains.isForumHost(source.url.host)) {
+        session: NgaRequestSession
+    ): Request {
+        val selectedUrl = if (NgaAuthPolicy.isLoginUrl(source.url)) {
             source.url.newBuilder().scheme("https").host(host).port(443).build()
         } else {
             source.url
         }
         val builder = source.newBuilder()
             .url(selectedUrl)
-            .header("User-Agent", UA)
-            .header("X-User-Agent", CLIENT_ID)
+            .tag(NgaRequestSession::class.java, session)
+            // A fixed forum origin keeps ordinary hotlinked attachments loadable.
             .header("Referer", "${NgaDomains.origin(host)}/")
-        if (uid.isNotBlank() && cid.isNotBlank()) {
-            builder.header("Cookie", "ngaPassportUid=$uid; ngaPassportCid=$cid")
+        NgaAuthPolicy.removeCredentials(builder)
+        if (NgaAuthPolicy.isTrusted(selectedUrl)) {
+            builder.header("User-Agent", UA)
+                .header("X-User-Agent", CLIENT_ID)
         }
         return builder.build()
     }

@@ -3,6 +3,7 @@ package com.qingyi5427.ngaqing.ui.history
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.qingyi5427.ngaqing.data.repository.NgaRepository
+import com.qingyi5427.ngaqing.data.local.RequestPreferences
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
@@ -15,6 +16,8 @@ import javax.inject.Inject
 class HistoryViewModel @Inject constructor(
     private val repo: NgaRepository
 ) : ViewModel() {
+    private var session: RequestPreferences? = null
+    init { viewModelScope.launch { session = repo.captureSession() } }
     private val query = MutableStateFlow("")
     private val sort = MutableStateFlow(HistorySort.RECENT)
     val history = combine(repo.history(), query, sort) { items, q, order ->
@@ -33,9 +36,13 @@ class HistoryViewModel @Inject constructor(
     fun setQuery(value: String) { query.value = value }
     fun setSort(value: HistorySort) { sort.value = value }
 
-    fun remove(tid: String) = viewModelScope.launch { repo.removeHistory(tid) }
+    fun remove(tid: String) = viewModelScope.launch {
+        session?.let { repo.removeHistory(tid, it) }
+    }
 
-    fun clear() = viewModelScope.launch { repo.clearHistory() }
+    fun clear() = viewModelScope.launch {
+        session?.let { repo.clearHistory(it) }
+    }
 }
 
 enum class HistorySort { RECENT, TITLE, AUTHOR }

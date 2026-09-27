@@ -2,6 +2,7 @@ package com.qingyi5427.ngaqing
 
 import android.os.Build
 import android.os.Bundle
+import android.content.res.Configuration
 import android.hardware.display.DisplayManager
 import android.view.Display
 import androidx.activity.ComponentActivity
@@ -32,6 +33,13 @@ class MainActivity : ComponentActivity() {
         setContent {
             NgaNavHost()
         }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // Keep the current navigation tree and WebView form while the window folds or rotates.
+        // Compose observes the updated constraints and WindowInfoTracker reports the new fold.
+        requestMaxRefreshRate()
     }
 
     /** 显式选用屏幕支持的最高刷新率（如 120Hz），否则部分机型会把第三方应用限制在 60Hz。 */

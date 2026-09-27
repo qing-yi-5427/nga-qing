@@ -11,6 +11,7 @@ import com.qingyi5427.ngaqing.data.local.ResponseCacheEntity
 import com.qingyi5427.ngaqing.data.local.DraftEntity
 import com.qingyi5427.ngaqing.data.local.WatchedThreadEntity
 import com.qingyi5427.ngaqing.data.local.UserPreferences
+import com.qingyi5427.ngaqing.data.local.RequestPreferences
 import com.qingyi5427.ngaqing.data.model.Board
 import com.qingyi5427.ngaqing.data.model.BoardGroup
 import com.qingyi5427.ngaqing.data.model.Post
@@ -30,6 +31,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
@@ -125,6 +129,7 @@ private fun normalizeBoardName(name: String): String =
  * All network responses are GBK-decoded Strings (see [com.qingyi5427.ngaqing.data.remote.GbkConverterFactory]).
  */
 @Singleton
+@OptIn(ExperimentalCoroutinesApi::class)
 class NgaRepository @Inject constructor(
     private val api: NgaApi,
     private val prefs: UserPreferences,
@@ -138,18 +143,39 @@ class NgaRepository @Inject constructor(
     private val lastCachePruneAt = AtomicLong(0L)
     private val cacheGeneration = AtomicLong(0L)
 
+    suspend fun captureSession(): RequestPreferences = prefs.requestPreferences()
+
+    suspend fun isSessionCurrent(snapshot: RequestPreferences): Boolean =
+        prefs.requestPreferences().let {
+            it.uid == snapshot.uid && it.cid == snapshot.cid && it.revision == snapshot.revision
+        }
+
+    private fun ownerOf(uid: String): String = uid.ifBlank { "__guest__" }
+
+    private suspend fun requireCurrent(session: RequestPreferences) {
+        if (!isSessionCurrent(session)) throw CancellationException("账号已切换，请在当前账号重新操作")
+    }
+
+    private suspend fun requireSession(session: RequestPreferences?): RequestPreferences =
+        (session ?: captureSession()).also { requireCurrent(it) }
+
     // ---------- Board tree (app_api home category) ----------
 
     suspend fun getCategory(): Result<List<BoardGroup>> = runCatching {
+        val session = captureSession()
         val cacheKey = "category"
-        val network = runCatching { api.homeCategory() }
+        val network = runCatching { api.homeCategory(session = session) }
         val raw = network.getOrElse {
-            db.responseCacheDao().get(cacheKey)?.payload ?: throw it
+            if (it is CancellationException) throw it
+            requireCurrent(session)
+            db.responseCacheDao().get(ownerOf(session.uid), cacheKey)?.payload ?: throw it
         }
+        requireCurrent(session)
         val parsed = parseCategoryOffMain(raw)
-        if (network.isSuccess && parsed.isNotEmpty()) cacheResponse(cacheKey, raw)
+        requireCurrent(session)
+        if (network.isSuccess && parsed.isNotEmpty()) cacheResponse(session, cacheKey, raw)
         parsed
-    }
+    }.also { it.exceptionOrNull()?.let { error -> if (error is CancellationException) throw error } }
 
     private fun parseCategory(json: String): List<BoardGroup> {
         val root = JSONObject(json)
@@ -236,6 +262,7 @@ class NgaRepository @Inject constructor(
         recommendedOnly: Boolean = false,
         sortByPostDate: Boolean = false
     ): ThreadPage {
+        val session = captureSession()
         val cacheKey = listOf(
             "threads", fid, stid.orEmpty(), page.toString(), authorId.orEmpty(),
             recommendedOnly.toString(), sortByPostDate.toString()
@@ -252,20 +279,27 @@ class NgaRepository @Inject constructor(
                         authorId = authorId,
                         recommend = 1.takeIf { recommendedOnly },
                         orderBy = "postdatedesc".takeIf { recommendedOnly || sortByPostDate },
-                        user = 1.takeIf { recommendedOnly }
+                        user = 1.takeIf { recommendedOnly },
+                        session = session
                     )
                 )
-            }.getOrElse { ThreadPage(error = it.message ?: "error", raw = "") }
+            }.getOrElse {
+                if (it is CancellationException) throw it
+                ThreadPage(error = it.message ?: "error", raw = "")
+            }
+            if (!isSessionCurrent(session)) return ThreadPage(error = "账号已切换", raw = "")
             if (!isRetryableError(r.error)) {
-                if (r.error == null && r.raw.isNotBlank()) cacheResponse(cacheKey, r.raw)
+                if (r.error == null && r.raw.isNotBlank()) cacheResponse(session, cacheKey, r.raw)
                 return r
             }
             last = r
             if (attempt < 2) delay(600L * (attempt + 1))
         }
-        val cached = db.responseCacheDao().get(cacheKey)
+        if (!isSessionCurrent(session)) return ThreadPage(error = "账号已切换", raw = "")
+        val cached = db.responseCacheDao().get(ownerOf(session.uid), cacheKey)
         if (cached != null) {
             val parsed = parseThreadsOffMain(cached.payload)
+            if (!isSessionCurrent(session)) return ThreadPage(error = "账号已切换", raw = "")
             if (parsed.error == null) return parsed.copy(fromCache = true, cachedAt = cached.updatedAt)
         }
         return last ?: ThreadPage(error = "加载失败", raw = "")
@@ -365,23 +399,30 @@ class NgaRepository @Inject constructor(
         page: Int = 1,
         authorId: String? = null
     ): PostPage {
+        val session = captureSession()
         val cacheKey = "posts:$tid:$page:${authorId.orEmpty()}"
         // NGA 偶发返回被截断的 JSON（响应不完整），解析/传输类失败自动重试
         var last: PostPage? = null
         repeat(3) { attempt ->
             val r = runCatching {
-                parsePostsOffMain(api.read(tid, page, authorId = authorId))
-            }.getOrElse { PostPage(error = it.message ?: "error", raw = "") }
+                parsePostsOffMain(api.read(tid, page, authorId = authorId, session = session))
+            }.getOrElse {
+                if (it is CancellationException) throw it
+                PostPage(error = it.message ?: "error", raw = "")
+            }
+            if (!isSessionCurrent(session)) return PostPage(error = "账号已切换", raw = "")
             if (!isRetryableError(r.error)) {
-                if (r.error == null && r.raw.isNotBlank()) cacheResponse(cacheKey, r.raw)
+                if (r.error == null && r.raw.isNotBlank()) cacheResponse(session, cacheKey, r.raw)
                 return r
             }
             last = r
             if (attempt < 2) delay(600L * (attempt + 1))
         }
-        val cached = db.responseCacheDao().get(cacheKey)
+        if (!isSessionCurrent(session)) return PostPage(error = "账号已切换", raw = "")
+        val cached = db.responseCacheDao().get(ownerOf(session.uid), cacheKey)
         if (cached != null) {
             val parsed = parsePostsOffMain(cached.payload)
+            if (!isSessionCurrent(session)) return PostPage(error = "账号已切换", raw = "")
             if (parsed.error == null) return parsed.copy(fromCache = true, cachedAt = cached.updatedAt)
         }
         return last ?: PostPage(error = "加载失败", raw = "")
@@ -489,15 +530,22 @@ class NgaRepository @Inject constructor(
     // ---------- Search (forum.php) ----------
 
     suspend fun search(key: String, fid: String? = null, stid: String? = null): ThreadPage {
+        val session = captureSession()
         val cacheKey = "search:${key.trim()}:${fid.orEmpty()}:${stid.orEmpty()}"
         return runCatching {
-            val raw = api.search(key = key, fid = fid.takeUnless { stid != null }, stid = stid)
+            val raw = api.search(key = key, fid = fid.takeUnless { stid != null }, stid = stid, session = session)
+            requireCurrent(session)
             parseThreadsOffMain(raw).also {
-                if (it.error == null && it.raw.isNotBlank()) cacheResponse(cacheKey, it.raw)
+                if (it.error == null && it.raw.isNotBlank()) cacheResponse(session, cacheKey, it.raw)
             }
         }.getOrElse { error ->
-            val cached = db.responseCacheDao().get(cacheKey)
-            cached?.let { parseThreadsOffMain(it.payload).copy(fromCache = true, cachedAt = it.updatedAt) }
+            if (error is CancellationException) throw error
+            if (!isSessionCurrent(session)) return ThreadPage(error = "账号已切换", raw = "")
+            val cached = db.responseCacheDao().get(ownerOf(session.uid), cacheKey)
+            cached?.let {
+                parseThreadsOffMain(it.payload).also { requireCurrent(session) }
+                    .copy(fromCache = true, cachedAt = it.updatedAt)
+            }
                 ?: ThreadPage(error = error.message ?: "error", raw = "")
         }
     }
@@ -509,28 +557,12 @@ class NgaRepository @Inject constructor(
      * 响应形如 {"data":{"0":0,"1":"回复成功"}} 或 {"error":{"0":"1:xxx"}}。
      */
     suspend fun reply(fid: String, tid: String, content: String): Result<String> = runCatching {
-        val raw = api.reply(fid = fid, tid = tid, content = content)
-        try {
-            val root = JSONObject(preprocess(raw))
-            val err = root.optJSONObject("error")
-            if (err != null) {
-                val msg = err.optString("0", raw.take(200))
-                throw IllegalStateException(msg.removePrefix("1:"))
-            }
-            val data = root.optJSONObject("data")
-            if (data != null) {
-                // data 里通常有 {0:0, 1:"回复成功", ...}
-                val ok = data.optString("1", data.optString("0", ""))
-                if (ok.contains("成功")) return@runCatching ok
-            }
-            throw IllegalStateException("服务器没有返回明确的成功结果，请稍后刷新帖子确认")
-        } catch (e: Exception) {
-            if (e is IllegalStateException) throw e
-            // 非 JSON 只接受包含明确“回复…成功”的响应；WAF/验证页不得误报成功。
-            val success = Regex("""回复[^\s<]{0,16}成功""").find(raw)?.value
-            success ?: throw IllegalStateException("无法确认回复是否成功，请刷新帖子后再决定是否重试")
-        }
-    }
+        val session = captureSession()
+        requireCurrent(session)
+        val raw = api.reply(fid = fid, tid = tid, content = content, session = session)
+        requireCurrent(session)
+        parseExplicitPublishSuccess(preprocess(raw), "reply")
+    }.also { it.exceptionOrNull()?.let { error -> if (error is CancellationException) throw error } }
 
     suspend fun publish(
         action: String,
@@ -539,9 +571,11 @@ class NgaRepository @Inject constructor(
         pid: String? = null,
         stid: String? = null,
         subject: String = "",
-        content: String
+        content: String,
+        session: RequestPreferences? = null
     ): Result<String> = runCatching {
         require(action in setOf("new", "reply", "quote")) { "不支持的发布动作" }
+        val snapshot = requireSession(session)
         val raw = api.publish(
             action = action,
             fid = fid,
@@ -549,51 +583,35 @@ class NgaRepository @Inject constructor(
             tid = tid,
             pid = pid,
             subject = subject,
-            content = content
+            content = content,
+            session = snapshot
         )
+        requireCurrent(snapshot)
         withContext(Dispatchers.Default) {
-            parsePublishResult(raw, if (action == "new") "主题发布成功" else "回复成功")
+            parsePublishResult(raw, action)
         }
-    }
+    }.also { it.exceptionOrNull()?.let { error -> if (error is CancellationException) throw error } }
 
-    private fun parsePublishResult(raw: String, fallbackSuccess: String): String {
-        val clean = preprocess(raw)
-        val root = runCatching { JSONObject(clean) }.getOrNull()
-        val error = root?.optJSONObject("error")
-        if (error != null) {
-            val message = error.keys().asSequence().joinToString(" ") { error.optString(it) }
-            throw IllegalStateException(message.substringAfter(':', message).ifBlank { "发布失败" })
-        }
-        val data = root?.optJSONObject("data")
-        val values = data?.keys()?.asSequence()?.map { data.optString(it) }?.toList().orEmpty()
-        val explicit = values.firstOrNull {
-            it.contains("成功") || it.contains("发布") || it.contains("回复")
-        }
-        if (explicit != null || Regex("(?:发帖|发布|回复)[^<\\s]{0,16}成功").containsMatchIn(raw)) {
-            return explicit ?: fallbackSuccess
-        }
-        // NGA 成功响应在不同版块可能只返回跳转地址或 tid/pid 数字。
-        if (data != null && data.length() > 0 && values.none { it.contains("失败") || it.contains("错误") }) {
-            return fallbackSuccess
-        }
-        throw IllegalStateException("服务器没有返回明确的成功结果，请刷新确认后再决定是否重试")
-    }
+    private fun parsePublishResult(raw: String, action: String): String =
+        parseExplicitPublishSuccess(preprocess(raw), action)
 
     // ---------- Shared helpers ----------
 
-    private fun cacheResponse(key: String, payload: String) {
+    private fun cacheResponse(session: RequestPreferences, key: String, payload: String) {
         val generation = cacheGeneration.get()
         cacheScope.launch {
             runCatching {
                 cacheMutex.withLock {
                     if (generation != cacheGeneration.get()) return@withLock
-                    db.responseCacheDao().put(ResponseCacheEntity(key, payload))
+                    if (!isSessionCurrent(session)) return@withLock
+                    val owner = ownerOf(session.uid)
+                    db.responseCacheDao().put(ResponseCacheEntity(key, payload, ownerUid = owner))
                     val now = System.currentTimeMillis()
                     val previous = lastCachePruneAt.get()
                     if (now - previous >= CACHE_PRUNE_INTERVAL_MILLIS &&
                         lastCachePruneAt.compareAndSet(previous, now)
                     ) {
-                        db.responseCacheDao().prune(now - CACHE_RETENTION_MILLIS)
+                        db.responseCacheDao().prune(owner, now - CACHE_RETENTION_MILLIS)
                     }
                 }
             }.onFailure { error ->
@@ -603,54 +621,82 @@ class NgaRepository @Inject constructor(
     }
 
     suspend fun clearResponseCache() = withContext(Dispatchers.IO) {
+        val session = captureSession()
         cacheGeneration.incrementAndGet()
-        cacheMutex.withLock { db.responseCacheDao().clear() }
+        cacheMutex.withLock {
+            requireCurrent(session)
+            db.responseCacheDao().clear(ownerOf(session.uid))
+        }
     }
 
     // ---------- Drafts ----------
 
-    suspend fun draft(key: String): DraftEntity? = db.draftDao().get(key)
+    suspend fun draft(key: String, session: RequestPreferences? = null): DraftEntity? {
+        val snapshot = requireSession(session)
+        return db.draftDao().get(ownerOf(snapshot.uid), key)
+    }
 
-    fun drafts(): Flow<List<DraftEntity>> = db.draftDao().all()
+    fun drafts(): Flow<List<DraftEntity>> = prefs.uid.flatMapLatest { db.draftDao().all(ownerOf(it)) }
 
-    suspend fun saveDraft(item: DraftEntity) = db.draftDao().put(item)
+    suspend fun saveDraft(item: DraftEntity, session: RequestPreferences? = null) {
+        val snapshot = requireSession(session)
+        db.draftDao().put(item.copy(ownerUid = ownerOf(snapshot.uid)))
+    }
 
-    suspend fun deleteDraft(key: String) = db.draftDao().delete(key)
+    suspend fun deleteDraft(key: String, session: RequestPreferences? = null) {
+        val snapshot = requireSession(session)
+        db.draftDao().delete(ownerOf(snapshot.uid), key)
+    }
 
     // ---------- Watched threads ----------
 
-    fun watchedThreads(): Flow<List<WatchedThreadEntity>> = db.watchedThreadDao().all()
+    fun watchedThreads(): Flow<List<WatchedThreadEntity>> = prefs.uid.flatMapLatest {
+        db.watchedThreadDao().all(ownerOf(it))
+    }
 
-    suspend fun isWatching(tid: String): Boolean = db.watchedThreadDao().get(tid) != null
+    suspend fun isWatching(tid: String, session: RequestPreferences? = null): Boolean =
+        db.watchedThreadDao().get(ownerOf(requireSession(session).uid), tid) != null
 
-    suspend fun watchThread(tid: String, title: String, fid: String, replies: Int) {
+    suspend fun watchThread(
+        tid: String, title: String, fid: String, replies: Int,
+        session: RequestPreferences? = null
+    ) {
+        val snapshot = requireSession(session)
         db.watchedThreadDao().put(
             WatchedThreadEntity(
                 tid = tid,
                 title = title,
                 fid = fid,
                 lastKnownReplies = replies,
-                lastSeenReplies = replies
+                lastSeenReplies = replies,
+                ownerUid = ownerOf(snapshot.uid)
             )
         )
     }
 
-    suspend fun unwatchThread(tid: String) = db.watchedThreadDao().delete(tid)
+    suspend fun unwatchThread(tid: String, session: RequestPreferences? = null) =
+        db.watchedThreadDao().delete(ownerOf(requireSession(session).uid), tid)
 
     // ---------- Community / user ----------
 
     suspend fun notifications(since: Long = 0): Result<List<CommunityItem>> = runCatching {
-        val raw = api.notifications(since = since)
+        val session = captureSession()
+        val raw = api.notifications(since = since, session = session)
+        requireCurrent(session)
         withContext(Dispatchers.Default) { parseCommunityItems(raw, "提醒") }
-    }
+    }.also { it.exceptionOrNull()?.let { error -> if (error is CancellationException) throw error } }
 
     suspend fun privateMessages(page: Int = 1): Result<List<CommunityItem>> = runCatching {
-        val raw = api.messages(page = page)
+        val session = captureSession()
+        val raw = api.messages(page = page, session = session)
+        requireCurrent(session)
         withContext(Dispatchers.Default) { parseCommunityItems(raw, "私信") }
-    }
+    }.also { it.exceptionOrNull()?.let { error -> if (error is CancellationException) throw error } }
 
     suspend fun userProfile(uid: String): Result<UserProfile> = runCatching {
-        val raw = api.userInfo(uid = uid)
+        val session = captureSession()
+        val raw = api.userInfo(uid = uid, session = session)
+        requireCurrent(session)
         withContext(Dispatchers.Default) {
             val root = JSONObject(preprocess(raw))
             val data = root.optJSONObject("data") ?: throw IllegalStateException(errorOf(root, root.toString()))
@@ -668,10 +714,12 @@ class NgaRepository @Inject constructor(
                 lastVisit = item.optLong("lastvisit", 0L)
             )
         }
-    }
+    }.also { it.exceptionOrNull()?.let { error -> if (error is CancellationException) throw error } }
 
     suspend fun userTopics(uid: String, page: Int = 1): Result<List<ThreadItem>> = runCatching {
-        val raw = api.userTopics(uid = uid, page = page)
+        val session = captureSession()
+        val raw = api.userTopics(uid = uid, page = page, session = session)
+        requireCurrent(session)
         withContext(Dispatchers.Default) {
             val root = JSONObject(preprocess(raw))
             val data = root.optJSONObject("data") ?: throw IllegalStateException(errorOf(root, root.toString()))
@@ -694,7 +742,7 @@ class NgaRepository @Inject constructor(
             }
             items.distinctBy { it.tid }
         }
-    }
+    }.also { it.exceptionOrNull()?.let { error -> if (error is CancellationException) throw error } }
 
     private suspend fun parseCategoryOffMain(raw: String): List<BoardGroup> =
         withContext(Dispatchers.Default) { parseCategory(raw) }
@@ -946,64 +994,138 @@ class NgaRepository @Inject constructor(
 
     // ---------- Favorites (Room) ----------
 
-    fun favorites(): Flow<List<FavoriteEntity>> = db.favoriteDao().all()
+    fun favorites(): Flow<List<FavoriteEntity>> = prefs.uid.flatMapLatest {
+        db.favoriteDao().all(ownerOf(it))
+    }
 
-    suspend fun isFavorite(tid: String): Boolean = db.favoriteDao().get(tid) != null
+    suspend fun isFavorite(tid: String, session: RequestPreferences? = null): Boolean {
+        val snapshot = requireSession(session)
+        return db.favoriteDao().get(ownerOf(snapshot.uid), tid) != null
+    }
 
-    suspend fun addFavorite(tid: String, title: String, fid: String = "", author: String = "") {
+    suspend fun addFavorite(
+        tid: String, title: String, fid: String = "", author: String = "",
+        session: RequestPreferences? = null
+    ): Result<Unit> {
+        val snapshot = requireSession(session)
         db.favoriteDao().insert(
             FavoriteEntity(
                 tid = tid,
                 title = title,
                 fid = fid,
-                author = author
+                author = author,
+                ownerUid = ownerOf(snapshot.uid)
             )
         )
-        runCatching { api.addServerFavorite(tid = tid) }
+        return try {
+            requireCurrent(snapshot)
+            parseFavoriteMutationResponse(preprocess(api.addServerFavorite(tid = tid, session = snapshot)), add = true)
+            requireCurrent(snapshot)
+            Result.success(Unit)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Result.failure(IllegalStateException("本地收藏已添加，NGA 端未确认：${error.message ?: "请手动重试"}", error))
+        }
     }
 
-    suspend fun removeFavorite(tid: String) {
-        db.favoriteDao().deleteByTid(tid)
-        runCatching { api.removeServerFavorite(tid = tid, tidArray = tid) }
+    suspend fun removeFavorite(tid: String, session: RequestPreferences? = null): Result<Unit> {
+        val snapshot = requireSession(session)
+        db.favoriteDao().deleteByTid(ownerOf(snapshot.uid), tid)
+        return try {
+            requireCurrent(snapshot)
+            parseFavoriteMutationResponse(preprocess(api.removeServerFavorite(tid = tid, tidArray = tid, session = snapshot)), add = false)
+            requireCurrent(snapshot)
+            Result.success(Unit)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Result.failure(IllegalStateException("本地收藏已移除，NGA 端未确认：${error.message ?: "请手动重试"}", error))
+        }
+    }
+
+    suspend fun retryServerFavorite(
+        tid: String, add: Boolean, session: RequestPreferences? = null
+    ): Result<Unit> = try {
+        val snapshot = requireSession(session)
+        val raw = if (add) {
+            api.addServerFavorite(tid = tid, session = snapshot)
+        } else {
+            api.removeServerFavorite(tid = tid, tidArray = tid, session = snapshot)
+        }
+        requireCurrent(snapshot)
+        parseFavoriteMutationResponse(preprocess(raw), add)
+        Result.success(Unit)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        Result.failure(error)
     }
 
     /**
      * 把 NGA 账号中的主题收藏合并进本地收藏。服务端接口不提供本地分组信息，
      * 因此只补充缺失项目，不覆盖用户已设置的分组和本地时间。
      */
-    suspend fun syncServerFavorites(): Result<Int> = runCatching {
-        val page = parseThreadsOffMain(api.threadList(favor = 1, page = 1))
-        page.error?.let { error(it) }
+    suspend fun syncServerFavorites(session: RequestPreferences? = null): Result<Int> = try {
+        val snapshot = requireSession(session)
+        require(snapshot.uid.isNotBlank()) { "请先登录再同步收藏" }
+        val all = collectFavoritePages { pageNumber ->
+            requireCurrent(snapshot)
+            val page = parseThreadsOffMain(api.threadList(favor = 1, page = pageNumber, session = snapshot))
+            requireCurrent(snapshot)
+            page
+        }
+        requireCurrent(snapshot)
         var added = 0
-        page.threads.forEach { thread ->
-            if (thread.tid.isNotBlank() && db.favoriteDao().get(thread.tid) == null) {
-                db.favoriteDao().insert(
-                    FavoriteEntity(
-                        tid = thread.tid,
-                        title = thread.subject.ifBlank { "主题 ${thread.tid}" },
-                        fid = "",
-                        author = thread.author,
-                        folder = "来自 NGA"
+        db.withTransaction {
+            requireCurrent(snapshot)
+            val owner = ownerOf(snapshot.uid)
+            all.forEach { thread ->
+                requireCurrent(snapshot)
+                if (db.favoriteDao().get(owner, thread.tid) == null) {
+                    db.favoriteDao().insert(
+                        FavoriteEntity(
+                            tid = thread.tid,
+                            title = thread.subject.ifBlank { "主题 ${thread.tid}" },
+                            fid = "",
+                            author = thread.author,
+                            folder = "来自 NGA",
+                            ownerUid = owner
+                        )
                     )
-                )
-                added++
+                    added++
+                }
             }
         }
-        added
+        Result.success(added)
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        Result.failure(error)
     }
 
-    suspend fun moveFavorite(tid: String, folder: String) {
-        db.favoriteDao().updateFolder(tid, folder.trim().ifBlank { "默认" })
+    suspend fun moveFavorite(tid: String, folder: String, session: RequestPreferences? = null) {
+        val snapshot = requireSession(session)
+        db.favoriteDao().updateFolder(ownerOf(snapshot.uid), tid, folder.trim().ifBlank { "默认" })
     }
 
     // ---------- Reading history ----------
 
-    fun history(): Flow<List<HistoryEntity>> = db.historyDao().all()
+    fun history(): Flow<List<HistoryEntity>> = prefs.uid.flatMapLatest {
+        db.historyDao().all(ownerOf(it))
+    }
 
-    suspend fun history(tid: String): HistoryEntity? = db.historyDao().get(tid)
+    suspend fun history(tid: String, session: RequestPreferences? = null): HistoryEntity? =
+        db.historyDao().get(ownerOf(requireSession(session).uid), tid)
 
-    suspend fun recordHistory(tid: String, title: String, author: String, fid: String) {
-        val old = db.historyDao().get(tid)
+    suspend fun recordHistory(
+        tid: String, title: String, author: String, fid: String,
+        session: RequestPreferences? = null
+    ) {
+        val snapshot = requireSession(session)
+        val owner = ownerOf(snapshot.uid)
+        val old = db.historyDao().get(owner, tid)
+        requireCurrent(snapshot)
         db.historyDao().insert(
             HistoryEntity(
                 tid = tid,
@@ -1011,25 +1133,31 @@ class NgaRepository @Inject constructor(
                 author = author.ifBlank { old?.author.orEmpty() },
                 fid = fid.ifBlank { old?.fid.orEmpty() },
                 lastVisited = System.currentTimeMillis(),
-                lastFloor = old?.lastFloor ?: 0
+                lastFloor = old?.lastFloor ?: 0,
+                ownerUid = owner
             )
         )
     }
 
-    suspend fun updateHistoryFloor(tid: String, floor: Int) {
-        db.historyDao().updateFloor(tid, floor.coerceAtLeast(0))
+    suspend fun updateHistoryFloor(tid: String, floor: Int, session: RequestPreferences? = null) {
+        val snapshot = requireSession(session)
+        db.historyDao().updateFloor(ownerOf(snapshot.uid), tid, floor.coerceAtLeast(0))
     }
 
-    suspend fun removeHistory(tid: String) = db.historyDao().deleteByTid(tid)
+    suspend fun removeHistory(tid: String, session: RequestPreferences? = null) =
+        db.historyDao().deleteByTid(ownerOf(requireSession(session).uid), tid)
 
-    suspend fun clearHistory() = db.historyDao().clear()
+    suspend fun clearHistory(session: RequestPreferences? = null) =
+        db.historyDao().clear(ownerOf(requireSession(session).uid))
 
     // ---------- Favorite boards ----------
 
     private fun boardKey(fid: String, stid: String?): String =
         stid?.takeIf { it.isNotBlank() }?.let { "stid:$it" } ?: "fid:$fid"
 
-    fun favoriteBoards(): Flow<List<Board>> = db.favoriteBoardDao().all().map { items ->
+    fun favoriteBoards(): Flow<List<Board>> = prefs.uid.flatMapLatest { uid ->
+        db.favoriteBoardDao().all(ownerOf(uid))
+    }.map { items ->
         items.map { item ->
             Board(
                 fid = item.fid,
@@ -1043,30 +1171,43 @@ class NgaRepository @Inject constructor(
         }
     }
 
-    suspend fun isFavoriteBoard(fid: String, stid: String?): Boolean =
-        db.favoriteBoardDao().get(boardKey(fid, stid)) != null
+    suspend fun isFavoriteBoard(
+        fid: String, stid: String?, session: RequestPreferences? = null
+    ): Boolean = db.favoriteBoardDao().get(
+        ownerOf(requireSession(session).uid), boardKey(fid, stid)
+    ) != null
 
-    suspend fun addFavoriteBoard(fid: String, stid: String?, name: String, info: String = "") {
+    suspend fun addFavoriteBoard(
+        fid: String, stid: String?, name: String, info: String = "",
+        session: RequestPreferences? = null
+    ) {
+        val snapshot = requireSession(session)
         db.favoriteBoardDao().insert(
             FavoriteBoardEntity(
                 key = boardKey(fid, stid),
                 fid = fid,
                 stid = stid.orEmpty(),
                 name = name,
-                info = info
+                info = info,
+                ownerUid = ownerOf(snapshot.uid)
             )
         )
     }
 
-    suspend fun removeFavoriteBoard(fid: String, stid: String?) {
-        db.favoriteBoardDao().deleteByKey(boardKey(fid, stid))
+    suspend fun removeFavoriteBoard(fid: String, stid: String?, session: RequestPreferences? = null) {
+        val snapshot = requireSession(session)
+        db.favoriteBoardDao().deleteByKey(ownerOf(snapshot.uid), boardKey(fid, stid))
     }
 
-    suspend fun reorderFavoriteBoards(boards: List<Board>) {
+    suspend fun reorderFavoriteBoards(boards: List<Board>, session: RequestPreferences? = null) {
+        val snapshot = requireSession(session)
         val newestOrder = System.currentTimeMillis()
         db.withTransaction {
+            requireCurrent(snapshot)
             boards.forEachIndexed { index, board ->
+                requireCurrent(snapshot)
                 db.favoriteBoardDao().updateOrder(
+                    ownerUid = ownerOf(snapshot.uid),
                     key = boardKey(board.fid, board.stid),
                     orderValue = newestOrder - index
                 )

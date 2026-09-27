@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
@@ -21,9 +23,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -34,7 +39,6 @@ import androidx.navigation.NavHostController
 import com.qingyi5427.ngaqing.ui.chrome.AppTopBar
 import com.qingyi5427.ngaqing.ui.Routes
 import com.qingyi5427.ngaqing.ui.gesture.SwipeBackContainer
-import kotlinx.coroutines.delay
 
 @Composable
 fun NewTopicScreen(
@@ -45,11 +49,12 @@ fun NewTopicScreen(
     val draftLoaded by viewModel.draftLoaded.collectAsStateWithLifecycle()
     val publishing by viewModel.publishing.collectAsStateWithLifecycle()
     val result by viewModel.result.collectAsStateWithLifecycle()
+    val publishSucceeded by viewModel.publishSucceeded.collectAsStateWithLifecycle()
     val ngaDomain by viewModel.ngaDomain.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    var subject by remember { mutableStateOf("") }
-    var content by remember { mutableStateOf("") }
-    var restored by remember { mutableStateOf(false) }
+    var subject by rememberSaveable { mutableStateOf("") }
+    var content by rememberSaveable { mutableStateOf("") }
+    var restored by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(draft, draftLoaded) {
         if (!restored && draftLoaded) {
@@ -58,16 +63,22 @@ fun NewTopicScreen(
             restored = true
         }
     }
-    LaunchedEffect(subject, content, restored) {
-        if (!restored && draft == null) return@LaunchedEffect
-        delay(600)
-        viewModel.saveDraft(subject, content)
+    val latestSubject by rememberUpdatedState(subject)
+    val latestContent by rememberUpdatedState(content)
+    val latestRestored by rememberUpdatedState(restored)
+    val latestSucceeded by rememberUpdatedState(publishSucceeded)
+    DisposableEffect(Unit) {
+        onDispose {
+            if (latestRestored && !latestSucceeded) {
+                viewModel.saveDraft(latestSubject, latestContent, immediate = true)
+            }
+        }
     }
-    LaunchedEffect(result) {
+    LaunchedEffect(result, publishSucceeded) {
         result?.let {
             Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+            if (publishSucceeded) nav.popBackStack()
             viewModel.consumeResult()
-            if (it.contains("成功")) nav.popBackStack()
         }
     }
 
@@ -96,19 +107,27 @@ fun NewTopicScreen(
                     }
                 }
             )
-            Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp)) {
+            Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 18.dp)) {
                 OutlinedTextField(
                     value = subject,
-                    onValueChange = { subject = it },
+                    onValueChange = {
+                        subject = it
+                        viewModel.saveDraft(it, content)
+                    },
                     label = { Text("标题") },
                     singleLine = true,
+                    enabled = draftLoaded && !publishing,
                     modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = content,
-                    onValueChange = { content = it },
+                    onValueChange = {
+                        content = it
+                        viewModel.saveDraft(subject, it)
+                    },
                     label = { Text("正文") },
                     minLines = 12,
+                    enabled = draftLoaded && !publishing,
                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
                 )
                 Row(Modifier.fillMaxWidth().padding(top = 8.dp)) {

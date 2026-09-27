@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import javax.inject.Inject
 
 data class UserUiState(
@@ -30,16 +31,21 @@ class UserViewModel @Inject constructor(
     val fallbackName: String = savedStateHandle["name"] ?: uid
     private val _state = MutableStateFlow(UserUiState())
     val state: StateFlow<UserUiState> = _state.asStateFlow()
+    private var refreshJob: Job? = null
+    private var generation = 0L
 
     init { refresh() }
 
     fun refresh() {
+        refreshJob?.cancel()
+        val request = ++generation
         _state.value = UserUiState(loading = true)
-        viewModelScope.launch {
+        refreshJob = viewModelScope.launch {
             val profile = async { repo.userProfile(uid) }
             val topics = async { repo.userTopics(uid) }
             val p = profile.await()
             val t = topics.await()
+            if (request != generation) return@launch
             _state.value = UserUiState(
                 loading = false,
                 profile = p.getOrNull(),

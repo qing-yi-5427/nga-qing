@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.qingyi5427.ngaqing.data.model.ThreadItem
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -24,7 +25,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 data class SavedAccount(val uid: String, val cid: String, val username: String)
-data class RequestPreferences(val uid: String, val cid: String, val ngaDomain: String)
+data class RequestPreferences(val uid: String, val cid: String, val ngaDomain: String, val revision: Long = 0L)
 
 private val Context.dataStore by preferencesDataStore("user_prefs")
 
@@ -39,7 +40,7 @@ class UserPreferences @Inject constructor(
     init {
         preferenceScope.launch {
             ds.data.collect { values ->
-                cachedRequestPreferences = values.toRequestPreferences()
+                updateCachedRequestPreferences(values.toRequestPreferences())
             }
         }
     }
@@ -55,31 +56,40 @@ class UserPreferences @Inject constructor(
     val readingLineSpacing: Flow<Float> = ds.data.map { (it[KEY_READING_LINE_SPACING] ?: 1f).coerceIn(0.9f, 1.25f) }
     val showSignatures: Flow<Boolean> = ds.data.map { it[KEY_SHOW_SIGNATURES] ?: true }
     val accounts: Flow<List<SavedAccount>> = ds.data.map { parseAccounts(it[KEY_ACCOUNTS]) }
+    val session: Flow<RequestPreferences> = ds.data.map { it.toRequestPreferences() }
 
     /** OkHttp 每个请求只读取一次 DataStore 快照，避免分别启动三个 Flow collector。 */
     fun requestPreferencesOrNull(): RequestPreferences? = cachedRequestPreferences
 
     suspend fun requestPreferences(): RequestPreferences =
-        cachedRequestPreferences ?: ds.data.first().toRequestPreferences().also {
-            cachedRequestPreferences = it
+        ds.data.first().toRequestPreferences().also(::updateCachedRequestPreferences)
+
+    private fun updateCachedRequestPreferences(value: RequestPreferences) {
+        synchronized(this) {
+            if (value.revision >= (cachedRequestPreferences?.revision ?: -1L)) {
+                cachedRequestPreferences = value
+            }
         }
+    }
 
     val blacklistUsers: Flow<Set<String>> = ds.data.map { csv(it[KEY_BL_USERS]) }
     val blacklistKeywords: Flow<Set<String>> = ds.data.map { csv(it[KEY_BL_KEYWORDS]) }
 
     suspend fun saveAuth(uid: String, cid: String, uname: String) {
-        ds.edit {
+        val updated = ds.edit {
             it[KEY_UID] = uid
             it[KEY_CID] = cid
             it[KEY_UNAME] = uname
             val accounts = parseAccounts(it[KEY_ACCOUNTS]).filterNot { account -> account.uid == uid } +
                 SavedAccount(uid, cid, uname)
             it[KEY_ACCOUNTS] = encodeAccounts(accounts)
+            it[KEY_SESSION_REVISION] = (it[KEY_SESSION_REVISION] ?: 0L) + 1L
         }
+        updateCachedRequestPreferences(updated.toRequestPreferences())
     }
 
     suspend fun clearAuth() {
-        ds.edit {
+        val updated = ds.edit {
             val activeUid = it[KEY_UID]
             if (!activeUid.isNullOrBlank()) {
                 it[KEY_ACCOUNTS] = encodeAccounts(
@@ -89,25 +99,29 @@ class UserPreferences @Inject constructor(
             it.remove(KEY_UID)
             it.remove(KEY_CID)
             it.remove(KEY_UNAME)
+            it[KEY_SESSION_REVISION] = (it[KEY_SESSION_REVISION] ?: 0L) + 1L
         }
+        updateCachedRequestPreferences(updated.toRequestPreferences())
     }
 
     suspend fun switchAccount(uid: String): Boolean {
         var switched = false
-        ds.edit {
+        val updated = ds.edit {
             val account = parseAccounts(it[KEY_ACCOUNTS]).firstOrNull { account -> account.uid == uid }
             if (account != null) {
                 it[KEY_UID] = account.uid
                 it[KEY_CID] = account.cid
                 it[KEY_UNAME] = account.username
                 switched = true
+                it[KEY_SESSION_REVISION] = (it[KEY_SESSION_REVISION] ?: 0L) + 1L
             }
         }
+        updateCachedRequestPreferences(updated.toRequestPreferences())
         return switched
     }
 
     suspend fun removeAccount(uid: String) {
-        ds.edit {
+        val updated = ds.edit {
             it[KEY_ACCOUNTS] = encodeAccounts(
                 parseAccounts(it[KEY_ACCOUNTS]).filterNot { account -> account.uid == uid }
             )
@@ -115,8 +129,10 @@ class UserPreferences @Inject constructor(
                 it.remove(KEY_UID)
                 it.remove(KEY_CID)
                 it.remove(KEY_UNAME)
+                it[KEY_SESSION_REVISION] = (it[KEY_SESSION_REVISION] ?: 0L) + 1L
             }
         }
+        updateCachedRequestPreferences(updated.toRequestPreferences())
     }
 
     suspend fun setTheme(mode: String) {
@@ -180,7 +196,8 @@ class UserPreferences @Inject constructor(
         RequestPreferences(
             uid = this[KEY_UID].orEmpty(),
             cid = this[KEY_CID].orEmpty(),
-            ngaDomain = NgaDomains.normalizeHost(this[KEY_NGA_DOMAIN])
+            ngaDomain = NgaDomains.normalizeHost(this[KEY_NGA_DOMAIN]),
+            revision = this[KEY_SESSION_REVISION] ?: 0L
         )
 
     companion object {
@@ -193,6 +210,7 @@ class UserPreferences @Inject constructor(
         val KEY_READING_LINE_SPACING = floatPreferencesKey("reading_line_spacing")
         val KEY_SHOW_SIGNATURES = booleanPreferencesKey("show_signatures")
         val KEY_ACCOUNTS = stringPreferencesKey("accounts")
+        val KEY_SESSION_REVISION = longPreferencesKey("session_revision")
         val KEY_BL_USERS = stringPreferencesKey("bl_users")
         val KEY_BL_KEYWORDS = stringPreferencesKey("bl_keywords")
     }

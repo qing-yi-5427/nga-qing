@@ -59,25 +59,11 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun switchAccount(uid: String) {
-        viewModelScope.launch {
-            if (prefs.switchAccount(uid)) loginHelper.syncAuthCookies()
-        }
+        viewModelScope.launch { loginHelper.switchAccount(uid) }
     }
 
     fun removeAccount(uid: String) {
-        viewModelScope.launch {
-            val wasActive = prefs.uid.first() == uid
-            prefs.removeAccount(uid)
-            if (wasActive) {
-                val next = prefs.accounts.first().firstOrNull()
-                if (next != null) {
-                    prefs.switchAccount(next.uid)
-                    loginHelper.syncAuthCookies()
-                } else {
-                    loginHelper.clearAuth()
-                }
-            }
-        }
+        viewModelScope.launch { loginHelper.removeAccount(uid) }
     }
 
     fun setNgaDomain(host: String) {
