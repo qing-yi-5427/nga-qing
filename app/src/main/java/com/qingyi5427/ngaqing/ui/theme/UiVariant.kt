@@ -6,14 +6,12 @@ import com.qingyi5427.ngaqing.BuildConfig
 
 /**
  * 变体枚举：build.gradle productFlavors 在编译期通过 BuildConfig.UI_VARIANT 固定。
- * 三版（classic/modern/minimal）在「方案 C · 玻璃 Glassmorph」定稿后统一为同一套
- * 玻璃风格设计系统（仅保留 flavor 以便三包共存安装对比）。
+ * 旧 flavor 标识仍用于已有安装包兼容；三个变体统一使用中性设计系统。
  */
 enum class Variant { CLASSIC, MODERN, MINIMAL }
 
 /**
- * 驱动全套视觉的令牌：配色之外，列表密度、圆角、是否卡片、导航形态都由它决定。
- * 定稿后三版统一为玻璃风格值。
+ * 旧调用方的布局令牌接口。新的页面颜色与形状由 NgaQingTheme 统一提供。
  */
 data class UiTokens(
     val cornerRadius: Dp,
@@ -21,9 +19,9 @@ data class UiTokens(
     val cardElevation: Dp,
     val denseList: Boolean,
     val dividerOnly: Boolean,   // 仅分隔线、无卡片背景
-    val hasBottomBar: Boolean,  // 是否显示底部胶囊导航
+    val hasBottomBar: Boolean,  // 根页面底部导航
     val defaultDark: Boolean,
-    val groupCard: Boolean      // 玻璃：内嵌分组容器
+    val groupCard: Boolean      // 分组容器
 )
 
 object UiVariant {
@@ -36,14 +34,14 @@ object UiVariant {
 
     val tokens: UiTokens
         get() = UiTokens(
-            cornerRadius = 14.dp,
-            listItemPadding = 12.dp,
+            cornerRadius = 10.dp,
+            listItemPadding = 14.dp,
             cardElevation = 0.dp,
             denseList = false,
-            dividerOnly = false,
+            dividerOnly = true,
             hasBottomBar = true,
             defaultDark = false,
-            groupCard = true
+            groupCard = false
         )
 
     val isClassic: Boolean get() = current == Variant.CLASSIC

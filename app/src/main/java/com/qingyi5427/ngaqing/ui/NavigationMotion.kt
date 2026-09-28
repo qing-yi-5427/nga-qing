@@ -1,5 +1,23 @@
 package com.qingyi5427.ngaqing.ui
 
+/** Navigation owns a whole destination, so expanded layouts must not animate their shared rail/list. */
+internal enum class NavigationMotionKind { NONE, ROOT_TAB, CHILD }
+
+internal fun navigationMotionKind(
+    fromRoute: String?,
+    toRoute: String?,
+    expanded: Boolean,
+    hasHinge: Boolean
+): NavigationMotionKind = when {
+    expanded || hasHinge -> NavigationMotionKind.NONE
+    isRootTabSwitch(fromRoute, toRoute) -> NavigationMotionKind.ROOT_TAB
+    else -> NavigationMotionKind.CHILD
+}
+
+/** Constrain a child destination to a small physical move, including very narrow windows. */
+internal fun childEnterOffset(width: Int, distancePx: Int, direction: Int): Int =
+    direction * distancePx.coerceAtMost((width / 10).coerceAtLeast(0))
+
 /** Positive means the destination enters from the right; negative from the left. */
 internal fun navigationDirection(fromRoute: String?, toRoute: String?, popping: Boolean): Int {
     val fromTab = rootTabIndex(fromRoute)

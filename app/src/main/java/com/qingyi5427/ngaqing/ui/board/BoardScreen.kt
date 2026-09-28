@@ -2,16 +2,29 @@ package com.qingyi5427.ngaqing.ui.board
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -34,6 +47,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -44,8 +58,8 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -53,8 +67,12 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -69,6 +87,10 @@ import com.qingyi5427.ngaqing.data.model.BoardGroup
 import com.qingyi5427.ngaqing.ui.Routes
 import com.qingyi5427.ngaqing.ui.chrome.AppBottomBar
 import com.qingyi5427.ngaqing.ui.chrome.AppTopBar
+import com.qingyi5427.ngaqing.ui.chrome.LocalRootNavigationRail
+import com.qingyi5427.ngaqing.ui.design.NgaStatePanel
+import com.qingyi5427.ngaqing.ui.design.NgaBackdropScope
+import com.qingyi5427.ngaqing.ui.design.ngaBackdropSource
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
@@ -84,6 +106,7 @@ fun BoardScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val favoriteBoards by viewModel.favoriteBoards.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
+    val hasDock = showBottomBar && !LocalRootNavigationRail.current
     val listState = remember(viewModel) {
         LazyListState(viewModel.initialScrollIndex, viewModel.initialScrollOffset)
     }
@@ -107,7 +130,14 @@ fun BoardScreen(
             )
         }
     }
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    NgaBackdropScope {
+    Box(
+        Modifier.fillMaxSize()
+            .then(if (hasDock) Modifier else Modifier.navigationBarsPadding())
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+    Column(Modifier.fillMaxSize()
+        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))) {
         AppTopBar("版块") {
             IconButton(onClick = { nav.navigate(Routes.searchRoute(null)) }) {
                 Icon(Icons.Filled.Search, contentDescription = "全站搜索")
@@ -116,7 +146,7 @@ fun BoardScreen(
         PullToRefreshBox(
             isRefreshing = isRefreshing,
             onRefresh = viewModel::refresh,
-            modifier = Modifier.weight(1f)
+            modifier = Modifier.weight(1f).ngaBackdropSource()
         ) {
             when (val current = state) {
                 is BoardUiState.Loading -> Box(
@@ -125,17 +155,23 @@ fun BoardScreen(
                 ) { CircularProgressIndicator() }
 
                 is BoardUiState.Error -> ErrorState(current.msg, viewModel::load)
-                is BoardUiState.Success -> BoardList(
+                is BoardUiState.Success -> if (current.groups.isEmpty() && favoriteBoards.isEmpty()) {
+                    BoardMessage("暂无版块", "下拉刷新以重新获取版块列表。")
+                } else BoardList(
                     current.groups,
                     favoriteBoards,
                     selectedBoardKey,
                     listState,
                     viewModel::reorderFavoriteBoards,
-                    onOpenBoard
+                    onOpenBoard,
+                    onSearch = { nav.navigate(Routes.searchRoute(null)) },
+                    showBottomBar = hasDock
                 )
             }
         }
-        if (showBottomBar) AppBottomBar(nav, Routes.BOARDS)
+    }
+    if (hasDock) Box(Modifier.align(Alignment.BottomCenter)) { AppBottomBar(nav, Routes.BOARDS) }
+    }
     }
 }
 
@@ -146,9 +182,14 @@ private fun BoardList(
     selectedBoardKey: String?,
     listState: LazyListState,
     onFavoriteOrderChanged: (List<Board>) -> Unit,
-    onOpenBoard: (Board) -> Unit
+    onOpenBoard: (Board) -> Unit,
+    onSearch: () -> Unit,
+    showBottomBar: Boolean
 ) {
     val categories = groups.groupBy { it.categoryName }
+    val dockClearance = 96.dp + with(LocalDensity.current) {
+        WindowInsets.navigationBars.getBottom(this).toDp()
+    }
     var collapsed by rememberSaveable { mutableStateOf(emptySet<String>()) }
     val orderedFavoriteBoards = remember { mutableStateOf(favoriteBoards) }
     var draggingFavoriteKey by remember { mutableStateOf<String?>(null) }
@@ -157,16 +198,107 @@ private fun BoardList(
     LaunchedEffect(favoriteBoards) {
         if (draggingFavoriteKey == null) orderedFavoriteBoards.value = favoriteBoards
     }
+    fun moveFavoriteForAccessibility(key: String, step: Int): Boolean {
+        val boards = orderedFavoriteBoards.value
+        val from = boards.indexOfFirst { favoriteBoardKey(it) == key }
+        val to = from + step
+        if (from !in boards.indices || to !in boards.indices) return false
+        val moved = moveFavoriteBoard(boards, key, favoriteBoardKey(boards[to]))
+        orderedFavoriteBoards.value = moved
+        onFavoriteOrderChanged(moved)
+        return true
+    }
+    val sections = buildList {
+        var nextIndex = 2 // The introduction and search entry are stable list items.
+        if (orderedFavoriteBoards.value.isNotEmpty()) {
+            add(BoardDirectorySection("favorite-boards", "收藏版块", orderedFavoriteBoards.value.size, nextIndex))
+            nextIndex += 1 + if ("favorite-boards" in collapsed) 0 else orderedFavoriteBoards.value.size
+            nextIndex++ // Gap after favorites.
+        }
+        categories.forEach { (categoryName, categoryGroups) ->
+            val categoryKey = "category-$categoryName"
+            val boardCount = categoryGroups.sumOf { it.children.size + if (it.parent == null) 0 else 1 }
+            add(BoardDirectorySection(categoryKey, categoryName, boardCount, nextIndex))
+            nextIndex++
+            if (categoryKey !in collapsed) categoryGroups.forEachIndexed { groupIndex, group ->
+                val groupKey = "group-${group.categoryName}-${group.groupName}"
+                if (group.parent != null || group.groupName != categoryName) nextIndex++
+                if (groupKey !in collapsed) nextIndex += group.children.size
+                if (groupIndex != categoryGroups.lastIndex) nextIndex++
+            }
+        }
+    }
+    val defaultSectionKey = sections.firstOrNull { section ->
+            if (section.key == "favorite-boards") orderedFavoriteBoards.value.any {
+                favoriteBoardKey(it) == selectedBoardKey
+            } else categories[section.label].orEmpty().any { group ->
+                group.parent?.let { favoriteBoardKey(it) == selectedBoardKey } == true ||
+                    group.children.any { favoriteBoardKey(it) == selectedBoardKey }
+            }
+        }?.key
+    val activeSectionKey by remember(listState, sections, defaultSectionKey) {
+        derivedStateOf {
+            val visibleIndexes = listState.layoutInfo.visibleItemsInfo.map { it.index }.toSet()
+            sections.lastOrNull { it.headerIndex in visibleIndexes }?.key
+                ?: sections.lastOrNull { it.headerIndex <= listState.firstVisibleItemIndex }?.key
+                ?: defaultSectionKey
+        }
+    }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+    val wideDirectory = maxWidth >= 720.dp
+    Row(Modifier.fillMaxSize()) {
+    if (wideDirectory) {
+        BoardDirectoryRail(sections, activeSectionKey) { section ->
+            if (section.key in collapsed) collapsed = collapsed - section.key
+            dragScope.launch { listState.animateScrollToItem(section.headerIndex) }
+        }
+        Spacer(Modifier.width(1.dp).fillMaxHeight().background(MaterialTheme.colorScheme.outlineVariant))
+    }
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.weight(1f).fillMaxHeight(),
         state = listState,
-        contentPadding = PaddingValues(bottom = 16.dp)
+        contentPadding = PaddingValues(bottom = if (showBottomBar) dockClearance else 24.dp)
     ) {
+        item(key = "directory-intro", contentType = "intro") {
+            Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)
+                .padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 10.dp)) {
+                Text("版块目录", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "${groups.sumOf { it.children.size + if (it.parent == null) 0 else 1 }} 个版块 · 找到感兴趣的讨论",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
+            }
+        }
+        item(key = "directory-search", contentType = "search") {
+            Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
+            Row(
+                Modifier.fillMaxWidth()
+                    .clickable(onClick = onSearch)
+                    .heightIn(min = 52.dp)
+                    .padding(horizontal = 24.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Filled.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Text(
+                    "搜索全站主题",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f).padding(start = 12.dp)
+                )
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
+        }
         if (orderedFavoriteBoards.value.isNotEmpty()) {
             val favoritesKey = "favorite-boards"
             val favoritesExpanded = favoritesKey !in collapsed
             item(key = favoritesKey, contentType = "section-header") {
-                CategoryHeader("收藏版块", favoritesExpanded, prefix = "") {
+                CategoryHeader("收藏版块", favoritesExpanded, count = orderedFavoriteBoards.value.size,
+                    detail = "长按拖动以调整顺序") {
                     collapsed = collapsed.toggle(favoritesKey)
                 }
             }
@@ -178,17 +310,28 @@ private fun BoardList(
                     var lastSwapTarget by remember(boardKey) { mutableStateOf<String?>(null) }
                     var orderChanged by remember(boardKey) { mutableStateOf(false) }
                     val dragging = draggingFavoriteKey == boardKey
+                    val orderIndex = orderedFavoriteBoards.value.indexOfFirst { favoriteBoardKey(it) == boardKey }
                     BoardRow(
                         board = board,
                         isChild = false,
                         selected = boardKey == selectedBoardKey,
                         showDragHandle = true,
+                        accessibilityActions = buildList {
+                            if (orderIndex > 0) add(CustomAccessibilityAction("上移${board.name}") {
+                                moveFavoriteForAccessibility(boardKey, -1)
+                            })
+                            if (orderIndex in 0 until orderedFavoriteBoards.value.lastIndex) {
+                                add(CustomAccessibilityAction("下移${board.name}") {
+                                    moveFavoriteForAccessibility(boardKey, 1)
+                                })
+                            }
+                        },
                         modifier = Modifier
                             .zIndex(if (dragging) 1f else 0f)
                             .graphicsLayer {
                                 translationY = dragOffset
-                                shadowElevation = if (dragging) 12.dp.toPx() else 0f
-                                shape = RoundedCornerShape(14.dp)
+                                shadowElevation = if (dragging) 4.dp.toPx() else 0f
+                                shape = RoundedCornerShape(12.dp)
                             }
                             .background(
                                 if (dragging) MaterialTheme.colorScheme.surfaceContainerHigh
@@ -262,13 +405,14 @@ private fun BoardList(
                     }
                 }
             }
-            item(key = "favorite-gap", contentType = "gap") { Box(Modifier.fillMaxWidth().height(8.dp)) }
+            item(key = "favorite-gap", contentType = "gap") { Box(Modifier.fillMaxWidth().height(20.dp)) }
         }
         categories.entries.forEachIndexed { categoryIndex, (categoryName, categoryGroups) ->
             val categoryKey = "category-$categoryName"
             val categoryExpanded = categoryKey !in collapsed
             item(key = categoryKey, contentType = "section-header") {
-                CategoryHeader(categoryName, categoryExpanded) {
+                CategoryHeader(categoryName, categoryExpanded,
+                    count = categoryGroups.sumOf { it.children.size + if (it.parent == null) 0 else 1 }) {
                     collapsed = collapsed.toggle(categoryKey)
                 }
             }
@@ -322,29 +466,90 @@ private fun BoardList(
             }
         }
     }
+    }
+    }
+}
+
+private data class BoardDirectorySection(
+    val key: String,
+    val label: String,
+    val count: Int,
+    val headerIndex: Int
+)
+
+@Composable
+private fun BoardDirectoryRail(
+    sections: List<BoardDirectorySection>,
+    activeKey: String?,
+    onSelect: (BoardDirectorySection) -> Unit
+) {
+    Column(
+        Modifier.width(220.dp).fillMaxHeight()
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 24.dp)
+    ) {
+        Text("目录概览", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text("按分类浏览所有版块", style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 4.dp, bottom = 20.dp))
+        sections.forEach { section ->
+            val active = section.key == activeKey
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 4.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (active) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+                    .clickable { onSelect(section) }
+                    .semantics {
+                        contentDescription = "跳转到${section.label}"
+                        selected = active
+                    }
+                    .heightIn(min = 48.dp).padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(section.label, style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (active) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (active) MaterialTheme.colorScheme.onPrimaryContainer
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f))
+                Text("${section.count}", style = MaterialTheme.typography.labelSmall,
+                    color = if (active) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
 }
 
 @Composable
 private fun CategoryHeader(
     name: String,
     expanded: Boolean,
-    prefix: String = "分类 · ",
+    count: Int,
+    detail: String? = null,
     onToggle: () -> Unit
 ) {
-    Row(
-        Modifier.fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(start = 20.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = "$prefix$name",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.weight(1f)
-        )
-        CollapseButton(expanded, onToggle, name)
+    Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                .padding(start = 24.dp, end = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(name, style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold, maxLines = 2,
+                        overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    Text("$count", style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 10.dp))
+                }
+                if (detail != null) Text(detail, style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            CollapseButton(expanded, onToggle, name)
+        }
     }
 }
 
@@ -352,13 +557,14 @@ private fun CategoryHeader(
 private fun GroupHeader(name: String, expanded: Boolean, onToggle: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth()
-            .padding(start = 20.dp, end = 8.dp, top = 6.dp, bottom = 2.dp),
+            .heightIn(min = 48.dp)
+            .padding(start = 24.dp, end = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text = name,
             style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.weight(1f)
         )
         CollapseButton(expanded, onToggle, name)
@@ -373,47 +579,33 @@ private fun BoardRow(
     expanded: Boolean? = null,
     onToggle: (() -> Unit)? = null,
     showDragHandle: Boolean = false,
+    accessibilityActions: List<CustomAccessibilityAction> = emptyList(),
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     val colorScheme = MaterialTheme.colorScheme
     Row(
         modifier.fillMaxWidth()
-            .background(
-                if (selected) colorScheme.secondaryContainer
-                else if (isChild) colorScheme.surfaceVariant.copy(alpha = 0.18f)
-                else Color.Transparent
-            )
+            .background(if (selected) colorScheme.primaryContainer else colorScheme.surface)
             .drawBehind {
-                if (selected) {
-                    drawRect(colorScheme.primary, size = Size(3.dp.toPx(), size.height))
-                }
+                if (selected) drawRect(colorScheme.primary, size = Size(3.dp.toPx(), size.height))
             }
-            .semantics { this.selected = selected }
+            .semantics {
+                this.selected = selected
+                if (accessibilityActions.isNotEmpty()) customActions = accessibilityActions
+            }
             .clickable(onClick = onClick)
-            .padding(
-                start = if (isChild) 30.dp else 20.dp,
-                end = 16.dp,
-                top = if (isChild) 10.dp else 13.dp,
-                bottom = if (isChild) 10.dp else 13.dp
-            ),
+            .heightIn(min = 64.dp)
+            .padding(start = if (isChild) 38.dp else 24.dp, end = 20.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        if (isChild) {
-            Box(
-                Modifier.width(2.dp).height(30.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(colorScheme.primary.copy(alpha = if (selected) 1f else 0.28f))
-            )
-            Box(Modifier.width(12.dp))
-        }
         BoardIcon(board, if (isChild) 34.dp else 42.dp)
         Column(Modifier.weight(1f).padding(start = 14.dp, end = 10.dp)) {
             Text(
                 board.name,
                 style = if (isChild) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
                 fontWeight = if (selected) FontWeight.SemiBold else null,
-                color = if (selected) colorScheme.onSecondaryContainer else colorScheme.onSurface,
+                color = if (selected) colorScheme.onPrimaryContainer else colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -421,8 +613,7 @@ private fun BoardRow(
                 Text(
                     board.info,
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (selected) colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
-                    else colorScheme.onSurfaceVariant,
+                    color = colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 2.dp)
@@ -465,13 +656,8 @@ private fun Set<String>.toggle(key: String): Set<String> =
 @Composable
 private fun BoardIcon(board: Board, size: Dp) {
     val shape = RoundedCornerShape(if (size > 36.dp) 12.dp else 10.dp)
-    val specifiedColor = board.iconColor?.let(::Color)
-    val background = specifiedColor ?: MaterialTheme.colorScheme.secondaryContainer
-    val foreground = if (specifiedColor == null) {
-        MaterialTheme.colorScheme.onSecondaryContainer
-    } else {
-        Color.White
-    }
+    val background = MaterialTheme.colorScheme.surfaceVariant
+    val foreground = MaterialTheme.colorScheme.onSurfaceVariant
 
     Box(
         Modifier.size(size).clip(shape).background(background),
@@ -482,7 +668,7 @@ private fun BoardIcon(board: Board, size: Dp) {
             if (!loaded) BoardIconFallback(foreground)
             AsyncImage(
                 model = board.iconUrl,
-                contentDescription = "${board.name}图标",
+                contentDescription = null,
                 modifier = Modifier.fillMaxSize().padding(3.dp)
                     .graphicsLayer { alpha = if (loaded) 1f else 0f },
                 contentScale = ContentScale.Fit,
@@ -508,17 +694,10 @@ private fun BoardIconFallback(color: Color) {
 
 @Composable
 private fun ErrorState(message: String, retry: () -> Unit) {
-    Column(
-        Modifier.fillMaxSize().padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text("版块加载失败", style = MaterialTheme.typography.titleLarge)
-        Text(
-            message,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 8.dp)
-        )
-        androidx.compose.material3.TextButton(onClick = retry) { Text("重试") }
-    }
+    BoardMessage("版块加载失败", message, retry)
+}
+
+@Composable
+private fun BoardMessage(title: String, detail: String, retry: (() -> Unit)? = null) {
+    NgaStatePanel(title, detail, actionLabel = if (retry == null) null else "重试", onAction = retry)
 }

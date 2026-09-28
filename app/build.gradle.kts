@@ -19,8 +19,8 @@ android {
         applicationId = "com.qingyi5427.ngaqing"
         minSdk = 24
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 3
+        versionName = "1.1.0"
         buildConfigField("String", "UI_VARIANT", "\"classic\"")
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -51,6 +51,10 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
     }
 
     composeOptions {
@@ -88,6 +92,8 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
+    // Source-backed blur for floating native Compose controls on Android 12+.
+    implementation("dev.chrisbanes.haze:haze:1.0.2")
     implementation("androidx.navigation:navigation-compose:$navVersion")
     implementation("androidx.window:window:1.4.0")
     implementation("androidx.room:room-runtime:$roomVersion")
@@ -117,5 +123,8 @@ dependencies {
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     testImplementation("androidx.arch.core:core-testing:2.2.0")
     testImplementation("io.mockk:mockk:1.13.13")
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    testImplementation("androidx.test.ext:junit:1.2.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

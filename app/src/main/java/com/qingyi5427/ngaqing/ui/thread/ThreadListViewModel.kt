@@ -68,8 +68,13 @@ class ThreadListViewModel @Inject constructor(
     val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
     private val _isFavoriteBoard = MutableStateFlow(false)
     val isFavoriteBoard: StateFlow<Boolean> = _isFavoriteBoard.asStateFlow()
-    private val _headerVisible = MutableStateFlow(savedStateHandle.get<Boolean>(HEADER_VISIBLE) ?: true)
-    val headerVisible: StateFlow<Boolean> = _headerVisible.asStateFlow()
+    private val _headerHiddenFraction = MutableStateFlow(
+        (savedStateHandle.get<Float>(HEADER_HIDDEN_FRACTION)
+            ?: if (savedStateHandle.get<Boolean>(LEGACY_HEADER_VISIBLE) == false) 1f else 0f)
+            .coerceIn(0f, 1f)
+    )
+    /** How far the full-height header has moved offscreen; shared by both reading panes. */
+    val headerHiddenFraction: StateFlow<Float> = _headerHiddenFraction.asStateFlow()
     val initialScrollIndex: Int get() = savedStateHandle[SCROLL_INDEX] ?: 0
     val initialScrollOffset: Int get() = savedStateHandle[SCROLL_OFFSET] ?: 0
     val visitedTids = repo.history().map { items -> items.mapTo(mutableSetOf()) { it.tid } }
@@ -190,12 +195,16 @@ class ThreadListViewModel @Inject constructor(
         savedStateHandle[SCROLL_OFFSET] = offset.coerceAtLeast(0)
     }
 
-    fun resetScrollPosition() = saveScrollPosition(0, 0)
+    fun resetScrollPosition() {
+        saveScrollPosition(0, 0)
+        setHeaderHiddenFraction(0f)
+    }
 
-    fun setHeaderVisible(visible: Boolean) {
-        if (_headerVisible.value == visible) return
-        _headerVisible.value = visible
-        savedStateHandle[HEADER_VISIBLE] = visible
+    fun setHeaderHiddenFraction(fraction: Float) {
+        val normalized = fraction.coerceIn(0f, 1f)
+        if (_headerHiddenFraction.value == normalized) return
+        _headerHiddenFraction.value = normalized
+        savedStateHandle[HEADER_HIDDEN_FRACTION] = normalized
     }
 
     fun toggleFavoriteBoard() {
@@ -223,6 +232,7 @@ class ThreadListViewModel @Inject constructor(
     private companion object {
         const val SCROLL_INDEX = "thread_scroll_index"
         const val SCROLL_OFFSET = "thread_scroll_offset"
-        const val HEADER_VISIBLE = "thread_header_visible"
+        const val HEADER_HIDDEN_FRACTION = "thread_header_hidden_fraction"
+        const val LEGACY_HEADER_VISIBLE = "thread_header_visible"
     }
 }

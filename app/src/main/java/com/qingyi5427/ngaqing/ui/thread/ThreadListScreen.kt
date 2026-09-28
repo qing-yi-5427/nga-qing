@@ -1,21 +1,30 @@
 package com.qingyi5427.ngaqing.ui.thread
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.rememberScrollableState
+import androidx.compose.foundation.gestures.scrollable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -34,7 +43,8 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Button
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -48,6 +58,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -56,14 +67,21 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Constraints
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
@@ -73,21 +91,26 @@ import com.qingyi5427.ngaqing.ui.Routes
 import com.qingyi5427.ngaqing.ui.board.boardIdentityKey
 import com.qingyi5427.ngaqing.ui.board.favoriteBoardKey
 import com.qingyi5427.ngaqing.ui.chrome.AppTopBar
+import com.qingyi5427.ngaqing.ui.design.NgaDimensions
+import com.qingyi5427.ngaqing.ui.design.NgaStatePanel
 import com.qingyi5427.ngaqing.ui.root.RootViewModel
-import com.qingyi5427.ngaqing.ui.theme.LocalGlassPalette
 import com.qingyi5427.ngaqing.ui.gesture.SwipeBackContainer
 import com.qingyi5427.ngaqing.ui.util.formatRelative
 import com.qingyi5427.ngaqing.ui.util.formatAuthorName
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
-internal fun shouldRevealHeaderAtTop(
-    totalItems: Int,
-    visibleItems: Int,
-    firstIndex: Int,
-    firstOffset: Int
-): Boolean = totalItems > 0 && visibleItems > 0 && firstIndex == 0 && firstOffset == 0
+internal data class HeaderScrollStep(val hiddenFraction: Float, val consumedY: Float)
+
+/** Consume exactly the distance traveled by the full-height header, leaving the rest to the list. */
+internal fun consumeHeaderScroll(availableY: Float, headerHeightPx: Int, hiddenFraction: Float): HeaderScrollStep {
+    if (headerHeightPx <= 0) return HeaderScrollStep(hiddenFraction, 0f)
+    val oldHidden = hiddenFraction.coerceIn(0f, 1f) * headerHeightPx
+    val newHidden = (oldHidden - availableY).coerceIn(0f, headerHeightPx.toFloat())
+    return HeaderScrollStep(newHidden / headerHeightPx, oldHidden - newHidden)
+}
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
@@ -107,59 +130,29 @@ fun ThreadListScreen(
     val sort by viewModel.sort.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     val isFavoriteBoard by viewModel.isFavoriteBoard.collectAsStateWithLifecycle()
-    val headerVisible by viewModel.headerVisible.collectAsStateWithLifecycle()
+    val headerHiddenFraction by viewModel.headerHiddenFraction.collectAsStateWithLifecycle()
     val visitedTids by viewModel.visitedTids.collectAsStateWithLifecycle()
     // The same list appears in its own destination and beside a post. The ViewModel's
     // SavedStateHandle is the single scroll source, avoiding two stale saveable snapshots.
     val listState = remember(viewModel) {
         LazyListState(viewModel.initialScrollIndex, viewModel.initialScrollOffset)
     }
-    val dragThreshold = with(LocalDensity.current) { 24.dp.toPx() }
-    val headerScrollConnection = remember(listState, dragThreshold, viewModel) {
+    var headerHeightPx by remember(viewModel) { mutableIntStateOf(0) }
+    val headerScrollConnection = remember(viewModel) {
         object : NestedScrollConnection {
-            private var accumulated = 0f
-
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (source != NestedScrollSource.UserInput || abs(available.y) <= abs(available.x)) {
-                    return Offset.Zero
-                }
-                val layout = listState.layoutInfo
-                if (layout.visibleItemsInfo.isEmpty()) return Offset.Zero
-                val atTop = shouldRevealHeaderAtTop(
-                    layout.totalItemsCount,
-                    layout.visibleItemsInfo.size,
-                    listState.firstVisibleItemIndex,
-                    listState.firstVisibleItemScrollOffset
-                )
-                if (atTop) {
-                    viewModel.setHeaderVisible(true)
-                    accumulated = 0f
-                    return Offset.Zero
-                }
-                val vertical = available.y
-                if (accumulated * vertical < 0f) accumulated = 0f
-                accumulated += vertical
-                if (abs(accumulated) >= dragThreshold) {
-                    viewModel.setHeaderVisible(accumulated > 0f)
-                    accumulated = 0f
-                }
-                return Offset.Zero
+                if (headerHeightPx <= 0 || abs(available.y) <= abs(available.x)) return Offset.Zero
+                val step = consumeHeaderScroll(available.y, headerHeightPx, viewModel.headerHiddenFraction.value)
+                if (step.consumedY == 0f) return Offset.Zero
+                viewModel.setHeaderHiddenFraction(step.hiddenFraction)
+                // The header consumes exactly its travel, so the first list row moves
+                // once at the finger's speed instead of scrolling twice.
+                return Offset(0f, step.consumedY)
             }
         }
     }
-    LaunchedEffect(listState) {
-        snapshotFlow {
-            val layout = listState.layoutInfo
-            shouldRevealHeaderAtTop(
-                layout.totalItemsCount,
-                layout.visibleItemsInfo.size,
-                listState.firstVisibleItemIndex,
-                listState.firstVisibleItemScrollOffset
-            )
-        }.distinctUntilChanged().collect { atTop -> if (atTop) viewModel.setHeaderVisible(true) }
-    }
     val scope = rememberCoroutineScope()
-    var menuOpen by remember { mutableStateOf(false) }
+    var sortMenuOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(listState) {
         snapshotFlow {
@@ -200,18 +193,27 @@ fun ThreadListScreen(
         onBack = { nav.popBackStack() },
         customGestureTopInset = 120.dp
     ) {
-        Column(Modifier.fillMaxSize().statusBarsPadding()) {
-            AnimatedVisibility(
-                visible = headerVisible,
-                enter = expandVertically(),
-                exit = shrinkVertically()
-            ) {
-                Column {
+        Layout(
+            modifier = Modifier.fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .nestedScroll(headerScrollConnection)
+                .clipToBounds(),
+            content = {
+                Column(
+                    Modifier.onSizeChanged { headerHeightPx = it.height }
+                        // The header itself remains a drag surface when a short window leaves
+                        // little or no list viewport. The parent consumes the same travel.
+                        .scrollable(rememberScrollableState { 0f }, Orientation.Vertical)
+                        .testTag("thread-header")
+                ) {
                     AppTopBar(
-                        title = viewModel.name,
+                        title = "NGA 清漪",
                         windowInsets = WindowInsets(0, 0, 0, 0),
                         onTitleClick = {
-                            if (listState.firstVisibleItemIndex > 0) {
+                            viewModel.setHeaderHiddenFraction(0f)
+                            if (listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0) {
                                 scope.launch { listState.animateScrollToItem(0) }
                             } else {
                                 viewModel.refresh()
@@ -234,65 +236,32 @@ fun ThreadListScreen(
                             IconButton(onClick = { nav.navigate(Routes.searchRoute(viewModel.fid, viewModel.stid)) }) {
                                 Icon(Icons.Filled.Search, contentDescription = "搜索本版")
                             }
-                            Box {
-                                IconButton(onClick = { menuOpen = true }) {
-                                    Icon(Icons.Filled.MoreVert, contentDescription = "更多")
-                                }
-                                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                                    DropdownMenuItem(
-                                        text = { Text("发布新主题") },
-                                        leadingIcon = { Icon(Icons.Filled.Edit, null) },
-                                        onClick = {
-                                            menuOpen = false
-                                            nav.navigate(
-                                                Routes.newTopicRoute(viewModel.fid, viewModel.name, viewModel.stid)
-                                            )
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("按最后回复排序") },
-                                        leadingIcon = {
-                                            if (sort == ThreadSort.LAST_REPLY) Icon(Icons.Filled.Check, null)
-                                        },
-                                        onClick = {
-                                            menuOpen = false
-                                            if (sort != ThreadSort.LAST_REPLY) {
-                                                viewModel.setSort(ThreadSort.LAST_REPLY)
-                                                viewModel.resetScrollPosition()
-                                                scope.launch { listState.scrollToItem(0) }
-                                            }
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("按发帖时间排序") },
-                                        leadingIcon = {
-                                            if (sort == ThreadSort.POST_DATE) Icon(Icons.Filled.Check, null)
-                                        },
-                                        onClick = {
-                                            menuOpen = false
-                                            if (sort != ThreadSort.POST_DATE) {
-                                                viewModel.setSort(ThreadSort.POST_DATE)
-                                                viewModel.resetScrollPosition()
-                                                scope.launch { listState.scrollToItem(0) }
-                                            }
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("刷新") },
-                                        leadingIcon = { Icon(Icons.Filled.Refresh, null) },
-                                        onClick = {
-                                            menuOpen = false
-                                            viewModel.refresh()
-                                        }
-                                    )
-                                }
+                            IconButton(onClick = {
+                                viewModel.setHeaderHiddenFraction(0f)
+                                viewModel.refresh()
+                            }) {
+                                Icon(Icons.Filled.Refresh, contentDescription = "刷新主题")
                             }
                         }
                     )
                     ForumLevelNavigation(
+                        boardName = viewModel.name,
                         subBoards = subBoards,
                         selectedBoardKey = boardIdentityKey(viewModel.fid, viewModel.stid),
                         recommendedOnly = recommendedOnly,
+                        sort = sort,
+                        sortMenuOpen = sortMenuOpen,
+                        onSortMenuChange = { sortMenuOpen = it },
+                        onSortChange = { newSort ->
+                            if (sort != newSort) {
+                                viewModel.setSort(newSort)
+                                viewModel.resetScrollPosition()
+                                scope.launch { listState.scrollToItem(0) }
+                            }
+                        },
+                        onNewTopic = {
+                            nav.navigate(Routes.newTopicRoute(viewModel.fid, viewModel.name, viewModel.stid))
+                        },
                         onRecommendedChange = { enabled ->
                             if (enabled != recommendedOnly) {
                                 viewModel.setRecommendedOnly(enabled)
@@ -305,11 +274,13 @@ fun ThreadListScreen(
                         }
                     )
                 }
-            }
             PullToRefreshBox(
                 isRefreshing = isRefreshing,
-                onRefresh = viewModel::refresh,
-                modifier = Modifier.weight(1f).nestedScroll(headerScrollConnection)
+                onRefresh = {
+                    viewModel.setHeaderHiddenFraction(0f)
+                    viewModel.refresh()
+                },
+                modifier = Modifier.testTag("thread-list-viewport")
             ) {
                 when (val current = state) {
                     is ThreadUiState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -322,14 +293,15 @@ fun ThreadListScreen(
                                 blockedKeywords.any { thread.subject.contains(it, ignoreCase = true) }
                         }
                         if (filtered.isEmpty()) {
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("没有符合当前条件的主题", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
+                            NgaStatePanel(
+                                title = "暂无主题",
+                                description = "没有符合当前条件的主题。可切换筛选或下拉刷新。"
+                            )
                         } else {
                             LazyColumn(
-                                Modifier.fillMaxSize(),
+                                Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface),
                                 state = listState,
-                                contentPadding = PaddingValues(vertical = 4.dp)
+                                contentPadding = PaddingValues(bottom = 12.dp)
                             ) {
                                 if (current.fromCache) {
                                     item(key = "offline-banner", contentType = "offline-banner") {
@@ -357,7 +329,7 @@ fun ThreadListScreen(
                                     }
                                     HorizontalDivider(
                                         color = MaterialTheme.colorScheme.outlineVariant,
-                                        modifier = Modifier.padding(start = 16.dp)
+                                        modifier = Modifier.padding(start = 20.dp)
                                     )
                                 }
                                 when {
@@ -389,63 +361,182 @@ fun ThreadListScreen(
                     }
                 }
             }
+            }
+        ) { children, constraints ->
+            val header = children[0].measure(
+                constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity)
+            )
+            val hidden = (header.height * headerHiddenFraction).roundToInt().coerceIn(0, header.height)
+            val viewportHeight = (constraints.maxHeight - header.height + hidden).coerceAtLeast(0)
+            val list = children[1].measure(Constraints.fixed(constraints.maxWidth, viewportHeight))
+            layout(constraints.maxWidth, constraints.maxHeight) {
+                header.place(0, -hidden)
+                list.place(0, header.height - hidden)
+            }
         }
     }
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 private fun ForumLevelNavigation(
+    boardName: String,
     subBoards: List<Board>,
     selectedBoardKey: String,
     recommendedOnly: Boolean,
+    sort: ThreadSort,
+    sortMenuOpen: Boolean,
+    onSortMenuChange: (Boolean) -> Unit,
+    onSortChange: (ThreadSort) -> Unit,
+    onNewTopic: () -> Unit,
     onRecommendedChange: (Boolean) -> Unit,
     onOpenBoard: (Board) -> Unit
 ) {
-    Row(
-        Modifier.fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        FilterChip(
-            selected = !recommendedOnly,
-            onClick = { onRecommendedChange(false) },
-            label = { Text("全部") }
+    var boardSheetOpen by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
+        Text(
+            boardName,
+            style = MaterialTheme.typography.headlineMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 5.dp)
         )
-        Spacer(Modifier.size(8.dp))
-        FilterChip(
-            selected = recommendedOnly,
-            onClick = { onRecommendedChange(true) },
-            label = { Text("精华区") }
-        )
-        subBoards.forEach { board ->
-            Spacer(Modifier.size(8.dp))
-            FilterChip(
-                selected = favoriteBoardKey(board) == selectedBoardKey,
-                onClick = { onOpenBoard(board) },
-                label = { Text(board.name, maxLines = 1) }
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            ForumTextTab(
+                selected = !recommendedOnly,
+                onClick = { onRecommendedChange(false) },
+                label = "全部主题"
             )
+            ForumTextTab(
+                selected = recommendedOnly,
+                onClick = { onRecommendedChange(true) },
+                label = "精华区"
+            )
+            if (subBoards.isNotEmpty()) {
+                TextButton(onClick = { boardSheetOpen = true }, modifier = Modifier.heightIn(min = NgaDimensions.minimumTouch)) {
+                    Text("子版块", maxLines = 1)
+                }
+            }
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Row(
+            Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Box(Modifier.weight(1f)) {
+                TextButton(onClick = { onSortMenuChange(true) }, modifier = Modifier.heightIn(min = NgaDimensions.minimumTouch)) {
+                    Text(if (sort == ThreadSort.LAST_REPLY) "最后回复 ↓" else "发帖时间 ↓")
+                }
+                DropdownMenu(expanded = sortMenuOpen, onDismissRequest = { onSortMenuChange(false) }) {
+                    DropdownMenuItem(
+                        text = { Text("按最后回复排序") },
+                        leadingIcon = { if (sort == ThreadSort.LAST_REPLY) Icon(Icons.Filled.Check, null) },
+                        onClick = { onSortMenuChange(false); onSortChange(ThreadSort.LAST_REPLY) }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("按发帖时间排序") },
+                        leadingIcon = { if (sort == ThreadSort.POST_DATE) Icon(Icons.Filled.Check, null) },
+                        onClick = { onSortMenuChange(false); onSortChange(ThreadSort.POST_DATE) }
+                    )
+                }
+            }
+            TextButton(onClick = onNewTopic, modifier = Modifier.heightIn(min = NgaDimensions.minimumTouch)) {
+                Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.size(5.dp))
+                Text("发主题")
+            }
+        }
+    }
+    if (boardSheetOpen) {
+        ModalBottomSheet(onDismissRequest = { boardSheetOpen = false }) {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+                Text(
+                    "选择子版块",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+                )
+                subBoards.forEach { board ->
+                    val selected = favoriteBoardKey(board) == selectedBoardKey
+                    Row(
+                        Modifier.fillMaxWidth().semantics { this.selected = selected }
+                            .clickable { boardSheetOpen = false; onOpenBoard(board) }
+                            .heightIn(min = 56.dp)
+                            .background(if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)
+                            .padding(horizontal = 20.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            board.name,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (selected) Icon(Icons.Filled.Check, null, tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
         }
     }
     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 }
 
 @Composable
+private fun ForumTextTab(selected: Boolean, onClick: () -> Unit, label: String) {
+    val accent = MaterialTheme.colorScheme.primary
+    Box(
+        Modifier.heightIn(min = NgaDimensions.minimumTouch)
+            .drawBehind {
+                if (selected) {
+                    drawRect(
+                        color = accent,
+                        topLeft = Offset(0f, size.height - 2.dp.toPx()),
+                        size = androidx.compose.ui.geometry.Size(size.width, 2.dp.toPx())
+                    )
+                }
+            }
+            .semantics { this.selected = selected }
+            .clickable(onClick = onClick)
+            .padding(horizontal = 3.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
 private fun ThreadRow(item: ThreadItem, isVisited: Boolean, selected: Boolean, onClick: () -> Unit) {
-    val palette = LocalGlassPalette.current
+    val selectedAccent = MaterialTheme.colorScheme.primary
     Column(
         Modifier.fillMaxWidth()
-            .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.background)
+            .background(if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)
+            .drawBehind {
+                if (selected) drawRect(selectedAccent, size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height))
+            }
+            .semantics { this.selected = selected }
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 13.dp)
+            .heightIn(min = NgaDimensions.minimumTouch)
+            .padding(horizontal = 20.dp, vertical = 15.dp)
     ) {
         Row(verticalAlignment = Alignment.Top) {
             Text(
                 item.subject.ifBlank { "（无标题）" },
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = if (isVisited) FontWeight.Normal else FontWeight.Medium,
-                color = if (isVisited) MaterialTheme.colorScheme.onSurfaceVariant
-                else MaterialTheme.colorScheme.onSurface,
+                fontWeight = if (isVisited) FontWeight.Normal else FontWeight.SemiBold,
+                color = when {
+                    selected -> MaterialTheme.colorScheme.onPrimaryContainer
+                    isVisited -> MaterialTheme.colorScheme.onSurfaceVariant
+                    else -> MaterialTheme.colorScheme.onSurface
+                },
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
@@ -455,26 +546,22 @@ private fun ThreadRow(item: ThreadItem, isVisited: Boolean, selected: Boolean, o
                 Text(
                     if (item.replies >= 100) "爆" else "热门",
                     style = MaterialTheme.typography.labelSmall,
-                    color = palette.hotFg,
-                    modifier = Modifier.clip(RoundedCornerShape(7.dp))
-                        .background(palette.hotBg)
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.clip(MaterialTheme.shapes.small)
+                        .background(MaterialTheme.colorScheme.primaryContainer)
                         .padding(horizontal = 7.dp, vertical = 3.dp)
                 )
             }
         }
         Row(Modifier.padding(top = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                formatAuthorName(item.author),
+                "${formatAuthorName(item.author)} · ${formatRelative(item.lastPostDate)}",
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
-                maxLines = 1
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
             )
-            Text(
-                " · ${formatRelative(item.lastPostDate)}",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.weight(1f))
             Icon(
                 Icons.Outlined.ChatBubbleOutline,
                 contentDescription = null,
@@ -493,17 +580,5 @@ private fun ThreadRow(item: ThreadItem, isVisited: Boolean, selected: Boolean, o
 
 @Composable
 private fun LoadError(message: String, retry: () -> Unit) {
-    Column(
-        Modifier.fillMaxSize().padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text("主题加载失败", style = MaterialTheme.typography.titleLarge)
-        Text(
-            message,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 8.dp)
-        )
-        TextButton(onClick = retry) { Text("重试") }
-    }
+    NgaStatePanel("主题加载失败", message, "重试", retry)
 }

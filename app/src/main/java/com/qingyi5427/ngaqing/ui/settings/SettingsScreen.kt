@@ -1,13 +1,26 @@
 package com.qingyi5427.ngaqing.ui.settings
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -23,6 +36,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.FontWeight
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
@@ -40,6 +55,7 @@ import com.qingyi5427.ngaqing.data.local.NgaDomains
 import com.qingyi5427.ngaqing.ui.chrome.AppTopBar
 import com.qingyi5427.ngaqing.ui.gesture.SwipeBackContainer
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SettingsScreen(nav: NavHostController, viewModel: SettingsViewModel = hiltViewModel()) {
     val theme by viewModel.themeMode.collectAsStateWithLifecycle()
@@ -56,7 +72,9 @@ fun SettingsScreen(nav: NavHostController, viewModel: SettingsViewModel = hiltVi
     var confirmLogout by remember { mutableStateOf(false) }
 
     SwipeBackContainer(onBack = { nav.popBackStack() }) {
-        Column(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+            .navigationBarsPadding().imePadding()) {
         AppTopBar(
             title = "设置",
             navigationIcon = {
@@ -67,16 +85,22 @@ fun SettingsScreen(nav: NavHostController, viewModel: SettingsViewModel = hiltVi
         )
         androidx.compose.foundation.lazy.LazyColumn(
             Modifier.weight(1f),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp)
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                start = 24.dp, end = 24.dp, top = 8.dp, bottom = 32.dp
+            ),
+            verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
             item {
-                SettingSection("外观") {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SettingSection("外观", "主题 · ${when (theme) { "light" -> "浅色"; "dark" -> "深色"; else -> "跟随系统" }}") {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
                         listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色").forEach { (mode, label) ->
                             FilterChip(
                                 selected = theme == mode,
                                 onClick = { viewModel.setTheme(mode) },
+                                modifier = Modifier.heightIn(min = 48.dp),
                                 label = { Text(label) }
                             )
                         }
@@ -84,23 +108,31 @@ fun SettingsScreen(nav: NavHostController, viewModel: SettingsViewModel = hiltVi
                 }
             }
             item {
-                SettingSection("阅读") {
+                SettingSection("阅读", "字号、行距和签名") {
                     Text("正文字号", style = MaterialTheme.typography.bodyMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
                         listOf(0.9f to "小", 1f to "标准", 1.15f to "大", 1.3f to "特大").forEach { (value, label) ->
                             FilterChip(
                                 selected = kotlin.math.abs(readingTextScale - value) < 0.01f,
                                 onClick = { viewModel.setReadingTextScale(value) },
+                                modifier = Modifier.heightIn(min = 48.dp),
                                 label = { Text(label) }
                             )
                         }
                     }
                     Text("行距", style = MaterialTheme.typography.bodyMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
                         listOf(0.9f to "紧凑", 1f to "标准", 1.18f to "宽松").forEach { (value, label) ->
                             FilterChip(
                                 selected = kotlin.math.abs(readingLineSpacing - value) < 0.01f,
                                 onClick = { viewModel.setReadingLineSpacing(value) },
+                                modifier = Modifier.heightIn(min = 48.dp),
                                 label = { Text(label) }
                             )
                         }
@@ -108,12 +140,13 @@ fun SettingsScreen(nav: NavHostController, viewModel: SettingsViewModel = hiltVi
                     FilterChip(
                         selected = showSignatures,
                         onClick = { viewModel.setShowSignatures(!showSignatures) },
+                        modifier = Modifier.heightIn(min = 48.dp),
                         label = { Text(if (showSignatures) "显示用户签名" else "隐藏用户签名") }
                     )
                 }
             }
             item {
-                SettingSection("账号") {
+                SettingSection("账号", "${accounts.size} 个已保存账号") {
                     if (accounts.size <= 1) {
                         Text(
                             "再次登录其他账号后，可在这里快速切换。",
@@ -123,39 +156,43 @@ fun SettingsScreen(nav: NavHostController, viewModel: SettingsViewModel = hiltVi
                     }
                     accounts.forEach { account ->
                         Row(
-                            Modifier.fillMaxWidth()
+                            Modifier.fillMaxWidth().heightIn(min = 64.dp)
                                 .clickable { viewModel.switchAccount(account.uid) }
                                 .padding(vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             RadioButton(
                                 selected = account.uid == activeUid,
-                                onClick = { viewModel.switchAccount(account.uid) }
+                                onClick = null
                             )
                             Column(Modifier.weight(1f).padding(start = 8.dp)) {
-                                Text(account.username.ifBlank { "NGA 用户" })
-                                Text("UID ${account.uid}", style = MaterialTheme.typography.bodySmall)
+                                Text(account.username.ifBlank { "NGA 用户" }, style = MaterialTheme.typography.bodyLarge)
+                                Text("UID ${account.uid}", style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             IconButton(onClick = { viewModel.removeAccount(account.uid) }) {
                                 Icon(Icons.Filled.DeleteOutline, contentDescription = "移除账号 ${account.username}")
                             }
                         }
                     }
-                    TextButton(onClick = { nav.navigate(Routes.ADD_ACCOUNT) }) { Text("添加账号") }
+                    TextButton(
+                        onClick = { nav.navigate(Routes.ADD_ACCOUNT) },
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    ) { Text("添加账号") }
                 }
             }
             item {
-                SettingSection("访问域名") {
+                SettingSection("访问域名", NgaDomains.options.firstOrNull { it.host == ngaDomain }?.label ?: ngaDomain) {
                     NgaDomains.options.forEach { option ->
                         Row(
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp)
                                 .clickable { viewModel.setNgaDomain(option.host) }
                                 .padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             RadioButton(
                                 selected = ngaDomain == option.host,
-                                onClick = { viewModel.setNgaDomain(option.host) }
+                                onClick = null
                             )
                             Column(Modifier.padding(start = 8.dp)) {
                                 Text(option.label, style = MaterialTheme.typography.bodyLarge)
@@ -175,7 +212,7 @@ fun SettingsScreen(nav: NavHostController, viewModel: SettingsViewModel = hiltVi
                 }
             }
             item {
-                SettingSection("屏蔽用户") {
+                SettingSection("屏蔽用户", "${blockedUsers.size} 位用户") {
                     OutlinedTextField(
                         value = userInput,
                         onValueChange = { userInput = it },
@@ -190,13 +227,27 @@ fun SettingsScreen(nav: NavHostController, viewModel: SettingsViewModel = hiltVi
                         }),
                         modifier = Modifier.fillMaxWidth()
                     )
+                    TextButton(
+                        onClick = {
+                            if (userInput.isNotBlank()) {
+                                viewModel.addBlacklistUser(userInput.trim())
+                                userInput = ""
+                            }
+                        },
+                        enabled = userInput.isNotBlank(),
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    ) { Text("添加屏蔽用户") }
+                    if (blockedUsers.isEmpty()) Text(
+                        "尚未屏蔽用户", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     blockedUsers.forEach { value ->
                         RemovableSetting(value) { viewModel.removeBlacklistUser(value) }
                     }
                 }
             }
             item {
-                SettingSection("屏蔽标题关键词") {
+                SettingSection("屏蔽标题关键词", "${blockedKeywords.size} 个关键词") {
                     OutlinedTextField(
                         value = keywordInput,
                         onValueChange = { keywordInput = it },
@@ -211,28 +262,41 @@ fun SettingsScreen(nav: NavHostController, viewModel: SettingsViewModel = hiltVi
                         }),
                         modifier = Modifier.fillMaxWidth()
                     )
+                    TextButton(
+                        onClick = {
+                            if (keywordInput.isNotBlank()) {
+                                viewModel.addBlacklistKeyword(keywordInput.trim())
+                                keywordInput = ""
+                            }
+                        },
+                        enabled = keywordInput.isNotBlank(),
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    ) { Text("添加关键词") }
+                    if (blockedKeywords.isEmpty()) Text(
+                        "尚未屏蔽标题关键词", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     blockedKeywords.forEach { value ->
                         RemovableSetting(value) { viewModel.removeBlacklistKeyword(value) }
                     }
                 }
             }
             item {
-                SettingSection("存储") {
+                SettingSection("存储", "离线缓存") {
                     Text(
                         "主题列表、帖子和搜索结果会保留 14 天，在网络不可用时自动显示。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    TextButton(onClick = viewModel::clearOfflineCache) {
+                    TextButton(onClick = viewModel::clearOfflineCache, modifier = Modifier.heightIn(min = 48.dp)) {
                         Text("清理离线缓存")
                     }
                 }
             }
             item {
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 TextButton(
                     onClick = { confirmLogout = true },
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(top = 8.dp)
                 ) {
                     Text("退出登录", color = MaterialTheme.colorScheme.error)
                 }
@@ -244,31 +308,47 @@ fun SettingsScreen(nav: NavHostController, viewModel: SettingsViewModel = hiltVi
     if (confirmLogout) {
         AlertDialog(
             onDismissRequest = { confirmLogout = false },
+            shape = RoundedCornerShape(12.dp),
+            containerColor = MaterialTheme.colorScheme.surface,
             title = { Text("退出登录？") },
             text = { Text("本机保存的 NGA 登录凭证会被清除，收藏仍会保留。") },
             confirmButton = {
                 TextButton(onClick = {
                     confirmLogout = false
                     viewModel.logout()
-                }) { Text("退出", color = MaterialTheme.colorScheme.error) }
+                }, modifier = Modifier.heightIn(min = 48.dp)) { Text("退出", color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = { TextButton(onClick = { confirmLogout = false }) { Text("取消") } }
+            dismissButton = {
+                TextButton(onClick = { confirmLogout = false }, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text("取消")
+                }
+            }
         )
     }
 }
 
 @Composable
-private fun SettingSection(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium)
+private fun SettingSection(title: String, summary: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().padding(top = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text(summary, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         content()
+        Spacer(Modifier.height(4.dp))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 
 @Composable
 private fun RemovableSetting(value: String, onRemove: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(value, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(vertical = 12.dp))
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically) {
+        Text(value, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
         IconButton(onClick = onRemove) {
             Icon(Icons.Filled.DeleteOutline, contentDescription = "移除 $value")
         }

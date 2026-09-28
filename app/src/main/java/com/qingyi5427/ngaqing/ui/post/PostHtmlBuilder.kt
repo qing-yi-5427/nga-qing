@@ -11,32 +11,34 @@ import com.qingyi5427.ngaqing.ui.util.formatDateTime
  * blocks showing only the quoted user, floor and content.
  */
 fun buildPostHtml(posts: List<Post>, dark: Boolean, subject: String, users: Map<String, String> = emptyMap()): String {
-    val bg = if (dark) "#0f0f12" else "#ffffff"
-    val fg = if (dark) "#e2e2e6" else "#1b1b1f"
-    val sub = if (dark) "#9a9aa2" else "#5a5a60"
-    val card = if (dark) "#1a1a1f" else "#f4f4f7"
-    val quoteBg = if (dark) "#232329" else "#ececf2"
-    val link = if (dark) "#7aa2ff" else "#1a5cff"
-    val border = if (dark) "#2a2a31" else "#e4e4ea"
+    // Match the native reading paper and the approved Origin palette.
+    val bg = if (dark) "#131b20" else "#fbfbf8"
+    val fg = if (dark) "#edf2f1" else "#171d21"
+    val sub = if (dark) "#a1afb5" else "#677078"
+    val quoteBg = if (dark) "#1b262c" else "#f4f5f2"
+    val link = if (dark) "#91c3dd" else "#356987"
+    val border = if (dark) "#344148" else "#dfe3e1"
 
     val css = """
         * { box-sizing: border-box; }
-        body { margin:0; padding:8px; background:$bg; color:$fg;
-               font-size:16px; line-height:1.6;
+        body { margin:0; padding:0; background:$bg; color:$fg;
+               font-size:16px; line-height:1.72;
                font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
-        a { color:$link; text-decoration:none; }
+        a { color:$link; text-decoration:underline; text-underline-offset:2px; }
         img { max-width:100%; height:auto; border-radius:8px; display:block; margin:6px 0; }
-        blockquote, .quote { margin:8px 0; padding:8px 12px; background:$quoteBg;
-               border-left:3px solid $border; border-radius:6px; color:$sub; }
+        blockquote, .quote { margin:14px 0; padding:12px 14px; background:$quoteBg;
+               border-left:3px solid $link; border-radius:0 8px 8px 0; color:$fg; }
         blockquote .qhead { font-size:12px; color:$link; margin-bottom:4px; }
         hr { border:none; border-top:1px solid $border; margin:8px 0; }
-        .post { background:$card; border:1px solid $border; border-radius:12px;
-                padding:10px 12px; margin:10px 0; }
+        .post { background:$bg; border-bottom:1px solid $border;
+                padding:22px 20px; margin:0; }
+        .post:first-child { padding-top:26px; }
         .head { display:flex; justify-content:space-between; align-items:baseline;
                 color:$sub; font-size:13px; margin-bottom:6px; }
-        .author { color:$fg; font-weight:600; }
+        .author { color:$fg; font-weight:650; min-width:0; overflow:hidden;
+                  text-overflow:ellipsis; white-space:nowrap; }
         .lou { color:$sub; font-size:12px; }
-        .subject { font-weight:600; font-size:17px; margin:2px 0 8px; }
+        .subject { font-weight:700; font-size:22px; margin:2px 0 12px; }
         .content { word-break:break-word; }
         .comments { margin-top:8px; padding-top:8px; border-top:1px dashed $border; }
         .comment { font-size:14px; color:$sub; margin:4px 0; }
@@ -45,9 +47,13 @@ fun buildPostHtml(posts: List<Post>, dark: Boolean, subject: String, users: Map<
     """.trimIndent()
 
     val body = StringBuilder()
-    // 标题只由顶栏（GlassTopBar）显示一处，正文不再重复渲染（避免同标题出现三次）
+    // The compact native bar shows the destination; the main post owns the subject once.
     for (p in posts) {
         body.append("<div class='post'>")
+        if (p.lou == 0) {
+            val title = p.subject.ifBlank { subject }
+            if (title.isNotBlank()) body.append("<h1 class='subject'>${escape(title)}</h1>")
+        }
         body.append("<div class='head'><span class='author'>${escape(p.author)}</span>")
         body.append("<span class='lou'>#${p.lou} · ${formatDateTime(p.postDate)}</span></div>")
         body.append("<div class='content'>${quoteToHtml(p.content, users)}</div>")

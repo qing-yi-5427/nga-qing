@@ -19,6 +19,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -26,7 +29,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,6 +45,7 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -70,14 +76,20 @@ import com.qingyi5427.ngaqing.ui.community.CommunityScreen
 import com.qingyi5427.ngaqing.ui.user.UserScreen
 import com.qingyi5427.ngaqing.ui.web.WebEditorScreen
 import com.qingyi5427.ngaqing.ui.theme.NgaQingTheme
+import com.qingyi5427.ngaqing.ui.chrome.AppNavigationRail
+import com.qingyi5427.ngaqing.ui.chrome.LocalRootNavigationRail
+import com.qingyi5427.ngaqing.ui.chrome.RootNavigationRailWidth
 import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowInfoTracker
+import androidx.core.view.WindowCompat
 import kotlinx.coroutines.flow.map
+import kotlin.math.min
 
-private const val COMPACT_TRANSITION_MILLIS = 280
-private const val EXPANDED_TRANSITION_MILLIS = 220
+// Compose tweens honor the platform MotionDurationScale; reduced motion (scale 0) snaps.
+private const val CHILD_TRANSITION_MILLIS = 180
+private const val TAB_TRANSITION_MILLIS = 120
 
-private fun AnimatedContentTransitionScope<NavBackStackEntry>.pageEnter(
+internal fun AnimatedContentTransitionScope<NavBackStackEntry>.pageEnter(
     expanded: Boolean,
     hasHinge: Boolean,
     shortDistancePx: Int,
@@ -85,25 +97,22 @@ private fun AnimatedContentTransitionScope<NavBackStackEntry>.pageEnter(
 ): EnterTransition {
     val from = initialState.destination.route
     val to = targetState.destination.route
-    val duration = if (expanded) EXPANDED_TRANSITION_MILLIS else COMPACT_TRANSITION_MILLIS
-    if (hasHinge || (expanded && isSharedListTransition(from, to))) {
-        return fadeIn(animationSpec = tween(duration), initialAlpha = 0f)
+    return when (navigationMotionKind(from, to, expanded, hasHinge)) {
+        NavigationMotionKind.NONE -> EnterTransition.None
+        NavigationMotionKind.ROOT_TAB -> fadeIn(
+            animationSpec = tween(TAB_TRANSITION_MILLIS), initialAlpha = 0f)
+        NavigationMotionKind.CHILD -> {
+            if (popping) return EnterTransition.None
+            val direction = navigationDirection(from, to, popping)
+            slideInHorizontally(
+                initialOffsetX = { width -> childEnterOffset(width, shortDistancePx, direction) },
+                animationSpec = tween(CHILD_TRANSITION_MILLIS, easing = FastOutSlowInEasing)
+            ) + fadeIn(initialAlpha = 0f, animationSpec = tween(150))
+        }
     }
-    val direction = navigationDirection(from, to, popping)
-    val backStyle = popping && !isRootTabSwitch(from, to)
-    return slideInHorizontally(
-        initialOffsetX = { width ->
-            direction * if (expanded) shortDistancePx.coerceAtMost(width)
-            else if (backStyle) width / 5 else width
-        },
-        animationSpec = tween(duration, easing = FastOutSlowInEasing)
-    ) + fadeIn(
-        initialAlpha = if (expanded) 0.82f else 0.9f,
-        animationSpec = tween(duration)
-    )
 }
 
-private fun AnimatedContentTransitionScope<NavBackStackEntry>.pageExit(
+internal fun AnimatedContentTransitionScope<NavBackStackEntry>.pageExit(
     expanded: Boolean,
     hasHinge: Boolean,
     shortDistancePx: Int,
@@ -111,22 +120,16 @@ private fun AnimatedContentTransitionScope<NavBackStackEntry>.pageExit(
 ): ExitTransition {
     val from = initialState.destination.route
     val to = targetState.destination.route
-    val duration = if (expanded) EXPANDED_TRANSITION_MILLIS else COMPACT_TRANSITION_MILLIS
-    if (hasHinge || (expanded && isSharedListTransition(from, to))) {
-        return fadeOut(animationSpec = tween(duration))
+    return when (navigationMotionKind(from, to, expanded, hasHinge)) {
+        NavigationMotionKind.NONE -> ExitTransition.None
+        NavigationMotionKind.ROOT_TAB -> fadeOut(animationSpec = tween(TAB_TRANSITION_MILLIS))
+        NavigationMotionKind.CHILD -> if (popping) {
+            slideOutHorizontally(
+                targetOffsetX = { width -> childEnterOffset(width, shortDistancePx, 1) },
+                animationSpec = tween(CHILD_TRANSITION_MILLIS, easing = FastOutSlowInEasing)
+            ) + fadeOut(targetAlpha = 0f, animationSpec = tween(150))
+        } else ExitTransition.None
     }
-    val direction = navigationDirection(from, to, popping)
-    val backStyle = popping && !isRootTabSwitch(from, to)
-    return slideOutHorizontally(
-        targetOffsetX = { width ->
-            -direction * if (expanded) (shortDistancePx / 2).coerceAtMost(width)
-            else if (backStyle) width else width / 5
-        },
-        animationSpec = tween(duration, easing = FastOutSlowInEasing)
-    ) + fadeOut(
-        targetAlpha = if (expanded) 0.7f else 0.78f,
-        animationSpec = tween(duration)
-    )
 }
 
 @Composable
@@ -168,6 +171,12 @@ fun NgaNavHost(
             }
         }
         previousNav = nav
+    }
+    SideEffect {
+        WindowCompat.getInsetsController(activity.window, activity.window.decorView).apply {
+            isAppearanceLightStatusBars = !dark
+            isAppearanceLightNavigationBars = !dark
+        }
     }
     NgaQingTheme(
         themeMode = themeMode,
@@ -236,7 +245,9 @@ fun NgaNavHost(
                         composable(Routes.LOGIN) { SinglePane(panes) { LoginScreen(nav) } }
                         composable(Routes.ADD_ACCOUNT) { SinglePane(panes) { LoginScreen(nav, addingAccount = true) } }
 
-                        composable(Routes.BOARDS) { SinglePane(panes) { BoardScreen(nav) } }
+                        composable(Routes.BOARDS) {
+                            RootPane(panes, nav, Routes.BOARDS) { BoardScreen(nav) }
+                        }
 
                         composable(
                             route = Routes.THREADS,
@@ -253,7 +264,8 @@ fun NgaNavHost(
                             val boardEntry = remember(backStack) {
                                 nav.previousBackStackEntry?.takeIf { it.destination.route == Routes.BOARDS }
                             }
-                            val showDual = panes.isTwoPane && boardEntry != null
+                            val contentPanes = railAdjustedPaneLayout(panes, effectiveRootRailWidth().value)
+                            val showDual = contentPanes.isTwoPane && boardEntry != null
                             val openBoard: (com.qingyi5427.ngaqing.data.model.Board) -> Unit = { board ->
                                 if (showDual) {
                                     nav.navigate(Routes.threadRoute(board.fid, board.name, board.stid)) {
@@ -263,9 +275,10 @@ fun NgaNavHost(
                                     nav.navigate(Routes.threadRoute(board.fid, board.name, board.stid))
                                 }
                             }
-                            Row(Modifier.fillMaxSize()) {
+                            ReadingPane(panes, nav, Routes.THREADS) { readingPanes ->
+                              Row(Modifier.fillMaxSize()) {
                                 boardEntry?.takeIf { showDual }?.let { sourceEntry ->
-                                    Box(Modifier.width(panes.listWidth.dp).fillMaxHeight()) {
+                                    Box(Modifier.width(readingPanes.listWidth.dp).fillMaxHeight()) {
                                         BoardScreen(
                                             nav,
                                             viewModel = hiltViewModel(sourceEntry),
@@ -277,13 +290,14 @@ fun NgaNavHost(
                                             onOpenBoard = openBoard
                                         )
                                     }
-                                    Spacer(Modifier.width(panes.gutterWidth.dp))
+                                    Spacer(Modifier.width(readingPanes.gutterWidth.dp))
                                 }
                                 Box(Modifier.weight(1f).fillMaxHeight()) {
-                                    PaneContent(panes, safeSingle = !showDual) {
+                                    PaneContent(readingPanes, safeSingle = !showDual) {
                                         ThreadListScreen(nav, onOpenBoard = openBoard)
                                     }
                                 }
+                              }
                             }
                         }
 
@@ -295,10 +309,12 @@ fun NgaNavHost(
                             val threadEntry = remember(backStack) {
                                 nav.previousBackStackEntry?.takeIf { it.destination.route == Routes.THREADS }
                             }
-                            val showDual = panes.isTwoPane && threadEntry != null
-                            Row(Modifier.fillMaxSize()) {
+                            val contentPanes = railAdjustedPaneLayout(panes, effectiveRootRailWidth().value)
+                            val showDual = contentPanes.isTwoPane && threadEntry != null
+                            ReadingPane(panes, nav, Routes.POSTS) { readingPanes ->
+                              Row(Modifier.fillMaxSize()) {
                                 threadEntry?.takeIf { showDual }?.let { sourceEntry ->
-                                    Box(Modifier.width(panes.listWidth.dp).fillMaxHeight()) {
+                                    Box(Modifier.width(readingPanes.listWidth.dp).fillMaxHeight()) {
                                         ThreadListScreen(
                                             nav = nav,
                                             viewModel = hiltViewModel(sourceEntry),
@@ -318,17 +334,22 @@ fun NgaNavHost(
                                             }
                                         )
                                     }
-                                    Spacer(Modifier.width(panes.gutterWidth.dp))
+                                    Spacer(Modifier.width(readingPanes.gutterWidth.dp))
                                 }
                                 Box(Modifier.weight(1f).fillMaxHeight()) {
-                                    PaneContent(panes, safeSingle = !showDual) { PostScreen(nav, dark = dark) }
+                                    PaneContent(readingPanes, safeSingle = !showDual) { PostScreen(nav, dark = dark) }
                                 }
+                              }
                             }
                         }
 
-                        composable(Routes.FAVORITES) { SinglePane(panes) { FavoritesScreen(nav) } }
+                        composable(Routes.FAVORITES) {
+                            RootPane(panes, nav, Routes.FAVORITES) { FavoritesScreen(nav) }
+                        }
 
-                        composable(Routes.PROFILE) { SinglePane(panes) { ProfileScreen(nav) } }
+                        composable(Routes.PROFILE) {
+                            RootPane(panes, nav, Routes.PROFILE) { ProfileScreen(nav) }
+                        }
 
                         composable(Routes.SETTINGS) { SinglePane(panes) { SettingsScreen(nav) } }
 
@@ -400,6 +421,87 @@ fun NgaNavHost(
 @Composable
 private fun SinglePane(panes: PaneLayout, content: @Composable () -> Unit) {
     PaneContent(panes, safeSingle = true, content = content)
+}
+
+@Composable
+private fun effectiveRootRailWidth(insets: WindowInsets = WindowInsets.safeDrawing): androidx.compose.ui.unit.Dp {
+    val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
+    val startInset = with(density) { insets.getLeft(density, layoutDirection).toDp() }
+    return RootNavigationRailWidth + startInset
+}
+
+/** The rail consumes real width; preserve two readable panes whenever both minimums still fit. */
+internal fun railAdjustedPaneLayout(panes: PaneLayout, railWidth: Float): PaneLayout {
+    if (!panes.isTwoPane || panes.gutterWidth > 1f) return panes
+    val remaining = (panes.viewportWidth - railWidth).coerceAtLeast(0f)
+    val minimumList = 280f
+    val minimumDetail = 360f
+    val gutter = 1f
+    if (remaining < minimumList + minimumDetail + gutter) {
+        return panes.copy(
+            viewportLeft = 0f, viewportWidth = remaining,
+            listWidth = 0f, gutterWidth = 0f, detailWidth = remaining,
+            singlePaneLeft = 0f, singlePaneWidth = remaining
+        )
+    }
+    val list = min(360f, (remaining * 0.38f).coerceAtLeast(minimumList))
+    return panes.copy(
+        viewportLeft = 0f, viewportWidth = remaining,
+        listWidth = list, gutterWidth = gutter, detailWidth = remaining - list - gutter,
+        singlePaneLeft = 0f, singlePaneWidth = remaining
+    )
+}
+
+/** Reading routes retain the same controller and entries while adding the board tab rail. */
+@Composable
+internal fun ReadingPane(
+    panes: PaneLayout,
+    nav: NavHostController,
+    route: String,
+    railInsets: WindowInsets = WindowInsets.safeDrawing,
+    content: @Composable (PaneLayout) -> Unit
+) {
+    val useRail = panes.isTwoPane && panes.gutterWidth <= 1f
+    if (!useRail) {
+        content(panes)
+        return
+    }
+    val railWidth = effectiveRootRailWidth(railInsets)
+    val readingPanes = railAdjustedPaneLayout(panes, railWidth.value)
+    CompositionLocalProvider(LocalRootNavigationRail provides true) {
+        Row(Modifier.fillMaxSize()) {
+            AppNavigationRail(
+                nav, currentRoute = route, selectedRoute = Routes.BOARDS,
+                safeInsets = railInsets, railWidth = railWidth
+            )
+            Box(Modifier.weight(1f).fillMaxHeight()) { content(readingPanes) }
+        }
+    }
+}
+
+@Composable
+internal fun RootPane(
+    panes: PaneLayout,
+    nav: NavHostController,
+    route: String,
+    railInsets: WindowInsets = WindowInsets.safeDrawing,
+    content: @Composable () -> Unit
+) {
+    // The one-pixel gutter identifies an uninterrupted wide viewport. A separating
+    // hinge keeps the established safe single pane, with compact bottom navigation.
+    val useRail = panes.isTwoPane && panes.gutterWidth <= 1f
+    if (!useRail) {
+        SinglePane(panes, content)
+        return
+    }
+    CompositionLocalProvider(LocalRootNavigationRail provides true) {
+        val railWidth = effectiveRootRailWidth(railInsets)
+        Row(Modifier.fillMaxSize()) {
+            AppNavigationRail(nav, route, safeInsets = railInsets, railWidth = railWidth)
+            Box(Modifier.weight(1f).fillMaxHeight().navigationBarsPadding()) { content() }
+        }
+    }
 }
 
 @Composable

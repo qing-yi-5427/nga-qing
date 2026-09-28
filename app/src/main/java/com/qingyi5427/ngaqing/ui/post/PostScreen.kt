@@ -8,13 +8,10 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
@@ -32,9 +29,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -71,7 +74,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -109,6 +112,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
@@ -128,7 +136,9 @@ import com.qingyi5427.ngaqing.data.model.Post
 import com.qingyi5427.ngaqing.data.local.NgaDomains
 import com.qingyi5427.ngaqing.data.remote.NgaInterceptor
 import com.qingyi5427.ngaqing.ui.Routes
-import com.qingyi5427.ngaqing.ui.theme.LocalGlassPalette
+import com.qingyi5427.ngaqing.ui.design.NgaBackdropScope
+import com.qingyi5427.ngaqing.ui.design.NgaGlassSurface
+import com.qingyi5427.ngaqing.ui.design.ngaBackdropSource
 import com.qingyi5427.ngaqing.ui.theme.LocalShowSignatures
 import com.qingyi5427.ngaqing.ui.gesture.SwipeBackContainer
 import com.qingyi5427.ngaqing.ui.util.formatAuthorName
@@ -173,9 +183,6 @@ fun PostScreen(
     var jumpText by remember { mutableStateOf("") }
     var pagePickerOpen by remember { mutableStateOf(false) }
     var pageText by remember { mutableStateOf("") }
-    var quickActionsVisible by remember { mutableStateOf(true) }
-    var quickActionsExpanded by remember { mutableStateOf(false) }
-    var suppressQuickActionScroll by remember { mutableStateOf(false) }
     val replying by viewModel.replying.collectAsStateWithLifecycle()
     val replyResult by viewModel.replyResult.collectAsStateWithLifecycle()
     val replySucceeded by viewModel.replySucceeded.collectAsStateWithLifecycle()
@@ -229,57 +236,11 @@ fun PostScreen(
         }
     }
 
-    // 下滑阅读时让快捷入口退出，反向上滑时再出现，避免长期遮挡正文。
-    LaunchedEffect(listState) {
-        var previousIndex = listState.firstVisibleItemIndex
-        var previousOffset = listState.firstVisibleItemScrollOffset
-        var accumulatedDelta = 0
-        snapshotFlow {
-            listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
-        }.distinctUntilChanged().collect { (index, offset) ->
-            val delta = when {
-                index > previousIndex -> 48
-                index < previousIndex -> -48
-                else -> offset - previousOffset
-            }
-            previousIndex = index
-            previousOffset = offset
-            if (suppressQuickActionScroll || delta == 0) {
-                accumulatedDelta = 0
-                return@collect
-            }
-
-            accumulatedDelta = when {
-                delta > 0 && accumulatedDelta < 0 -> delta
-                delta < 0 && accumulatedDelta > 0 -> delta
-                else -> accumulatedDelta + delta
-            }
-            when {
-                accumulatedDelta >= 12 -> {
-                    quickActionsVisible = false
-                    quickActionsExpanded = false
-                    accumulatedDelta = 0
-                }
-                accumulatedDelta <= -12 -> {
-                    quickActionsVisible = true
-                    accumulatedDelta = 0
-                }
-            }
-        }
-    }
-
     LaunchedEffect(s, targetFloor) {
         val current = s as? PostUiState.Success ?: return@LaunchedEffect
         val target = targetFloor ?: return@LaunchedEffect
         val index = current.posts.indexOfFirst { it.lou >= target }.takeIf { it >= 0 } ?: 0
-        suppressQuickActionScroll = true
-        try {
-            listState.scrollToItem(index)
-        } finally {
-            suppressQuickActionScroll = false
-        }
-        quickActionsVisible = true
-        quickActionsExpanded = false
+        listState.scrollToItem(postLazyItemIndex(index, current.fromCache))
         viewModel.consumeTargetFloor()
     }
 
@@ -289,7 +250,7 @@ fun PostScreen(
             .distinctUntilChanged()
             .collect { scrolling ->
                 if (!scrolling) {
-                    current.posts.getOrNull(listState.firstVisibleItemIndex)
+                    current.posts.getOrNull(visiblePostIndex(listState.firstVisibleItemIndex, current.fromCache))
                         ?.let { viewModel.updateReadFloor(it.lou) }
                 }
             }
@@ -302,20 +263,17 @@ fun PostScreen(
         // 网页模式仍保留 Android 左侧边缘的系统预测性返回。
         contentSwipeEnabled = !webFallback.value
     ) {
+        NgaBackdropScope {
+        Box(
+            Modifier.fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                .navigationBarsPadding()
+        ) {
         Column(Modifier.fillMaxSize()) {
         com.qingyi5427.ngaqing.ui.chrome.AppTopBar(
-            title = subject.ifBlank { "帖子" },
+            title = "帖子",
             onTitleClick = {
-                scope.launch {
-                    suppressQuickActionScroll = true
-                    try {
-                        listState.animateScrollToItem(0)
-                    } finally {
-                        suppressQuickActionScroll = false
-                        quickActionsVisible = true
-                        quickActionsExpanded = false
-                    }
-                }
+                scope.launch { listState.animateScrollToItem(0) }
             },
             navigationIcon = {
                 IconButton(onClick = { nav.popBackStack() }) {
@@ -411,7 +369,7 @@ fun PostScreen(
         PullToRefreshBox(
             isRefreshing = isRefreshing,
             onRefresh = viewModel::refresh,
-            modifier = Modifier.weight(1f).fillMaxWidth()
+            modifier = Modifier.weight(1f).fillMaxWidth().ngaBackdropSource()
         ) {
             when (val cur = s) {
                 is PostUiState.Loading -> Box(Modifier.fillMaxSize(), Alignment.Center) {
@@ -433,9 +391,10 @@ fun PostScreen(
                 is PostUiState.Success -> {
                     val posts = cur.posts
                     LazyColumn(
-                        Modifier.fillMaxSize(),
+                        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)
+                            .testTag("post-reading-list"),
                         state = listState,
-                        contentPadding = PaddingValues(bottom = 96.dp)
+                        contentPadding = PaddingValues(bottom = 76.dp)
                     ) {
                         if (cur.fromCache) {
                             item(key = "offline-banner", contentType = "offline-banner") {
@@ -462,14 +421,7 @@ fun PostScreen(
                                     val idx = posts.indexOfFirst { it.lou == floor }
                                     if (idx >= 0) {
                                         scope.launch {
-                                            suppressQuickActionScroll = true
-                                            try {
-                                                listState.animateScrollToItem(idx)
-                                            } finally {
-                                                suppressQuickActionScroll = false
-                                                quickActionsVisible = true
-                                                quickActionsExpanded = false
-                                            }
+                                            listState.animateScrollToItem(postLazyItemIndex(idx, cur.fromCache))
                                         }
                                     } else {
                                         Toast.makeText(ctx, "该楼层尚未加载", Toast.LENGTH_SHORT).show()
@@ -488,9 +440,9 @@ fun PostScreen(
                                     }
                                 }
                             )
-                            Spacer(
-                                Modifier.fillMaxWidth().height(8.dp)
-                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.38f))
+                            HorizontalDivider(
+                                color = MaterialTheme.colorScheme.outlineVariant,
+                                modifier = Modifier.padding(horizontal = 20.dp)
                             )
                         }
                         if (isLoadingMore) {
@@ -511,7 +463,7 @@ fun PostScreen(
                             }
                         } else if (cur.page >= cur.totalPages) {
                             item {
-                                Box(Modifier.fillMaxWidth().padding(20.dp), Alignment.Center) {
+                                Box(Modifier.fillMaxWidth().padding(vertical = 10.dp), Alignment.Center) {
                                     Text("— 没有更多了 —", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
                                 }
                             }
@@ -528,45 +480,43 @@ fun PostScreen(
                             }
                         }
                     }
-                    if (posts.isNotEmpty()) {
-                        val readingPage by remember(posts, cur.page, cur.totalPages) {
-                            derivedStateOf {
-                                posts.getOrNull(listState.firstVisibleItemIndex)?.lou
-                                    ?.div(30)?.plus(1)
-                                    ?.coerceIn(1, cur.totalPages)
-                                    ?: cur.page
-                            }
-                        }
-                        PostQuickActions(
-                            visible = quickActionsVisible,
-                            expanded = quickActionsExpanded,
-                            currentPage = readingPage,
-                            totalPages = cur.totalPages,
-                            onlyAuthor = onlyAuthor,
-                            onToggle = { quickActionsExpanded = !quickActionsExpanded },
-                            onReply = {
-                                quickActionsExpanded = false
-                                viewModel.setReplyTarget(null)
-                                replyText = savedDraft
-                                replyOpen = true
-                            },
-                            onPage = {
-                                quickActionsExpanded = false
-                                pageText = readingPage.toString()
-                                pagePickerOpen = true
-                            },
-                            onOnlyAuthor = {
-                                quickActionsExpanded = false
-                                quickActionsVisible = true
-                                viewModel.toggleOnlyAuthor()
-                            },
-                            modifier = Modifier.align(Alignment.BottomEnd)
-                                .navigationBarsPadding()
-                                .padding(end = 16.dp, bottom = 18.dp)
-                        )
-                    }
                 }
             }
+        }
+        }
+        val readingState = s as? PostUiState.Success
+        if (readingState != null && readingState.posts.isNotEmpty()) {
+            val readingPage by remember(readingState.posts, readingState.page, readingState.totalPages, readingState.fromCache) {
+                derivedStateOf {
+                    readingPageForVisibleIndex(
+                        readingState.posts,
+                        listState.firstVisibleItemIndex,
+                        readingState.fromCache,
+                        readingState.page,
+                        readingState.totalPages
+                    )
+                }
+            }
+            PostQuickActions(
+                currentPage = readingPage,
+                totalPages = readingState.totalPages,
+                onlyAuthor = onlyAuthor,
+                onReply = {
+                    viewModel.setReplyTarget(null)
+                    replyText = savedDraft
+                    replyOpen = true
+                },
+                onPage = {
+                    pageText = readingPage.toString()
+                    pagePickerOpen = true
+                },
+                onOnlyAuthor = {
+                    viewModel.toggleOnlyAuthor()
+                },
+                modifier = Modifier.align(Alignment.BottomEnd)
+                    .padding(end = 16.dp, bottom = 14.dp)
+            )
+        }
         }
         }
     }
@@ -581,6 +531,7 @@ fun PostScreen(
         ) {
             Column(
                 Modifier.fillMaxWidth().navigationBarsPadding().imePadding()
+                    .verticalScroll(rememberScrollState())
                     .padding(start = 20.dp, end = 20.dp, bottom = 20.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -690,6 +641,7 @@ fun PostScreen(
         ) {
             Column(
                 Modifier.fillMaxWidth().navigationBarsPadding().imePadding()
+                    .verticalScroll(rememberScrollState())
                     .padding(start = 20.dp, end = 20.dp, bottom = 20.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -727,8 +679,8 @@ fun PostScreen(
                         viewModel.saveDraft(it)
                     },
                     placeholder = { Text("写下你的回复……") },
-                    minLines = 8,
-                    maxLines = 14,
+                    minLines = 5,
+                    maxLines = 10,
                     modifier = Modifier.fillMaxWidth()
                 )
                 TextButton(
@@ -758,100 +710,100 @@ fun PostScreen(
     }
 }
 
+internal fun readingPageForVisibleIndex(
+    posts: List<Post>,
+    firstVisibleItemIndex: Int,
+    fromCache: Boolean,
+    fallbackPage: Int,
+    totalPages: Int
+): Int {
+    if (posts.isEmpty()) return fallbackPage
+    val postIndex = visiblePostIndex(firstVisibleItemIndex, fromCache).coerceAtMost(posts.lastIndex)
+    return (posts[postIndex].lou / 30 + 1).coerceIn(1, totalPages.coerceAtLeast(1))
+}
+
+/** LazyColumn's offline banner is an item, but it is not a floor. */
+internal fun postLazyItemIndex(postIndex: Int, fromCache: Boolean): Int =
+    postIndex + if (fromCache) 1 else 0
+
+internal fun visiblePostIndex(firstVisibleItemIndex: Int, fromCache: Boolean): Int =
+    (firstVisibleItemIndex - if (fromCache) 1 else 0).coerceAtLeast(0)
+
+/** Keep the visual page label compact; semantics and the page sheet retain the full count. */
+internal fun compactPageLabel(currentPage: Int, totalPages: Int, largeText: Boolean): String {
+    val full = "$currentPage/$totalPages"
+    val page = currentPage.toString()
+    return when {
+        full.length <= (if (largeText) 3 else 5) -> full
+        page.length <= (if (largeText) 5 else 8) -> page
+        else -> "页"
+    }
+}
+
 @Composable
 private fun PostQuickActions(
-    visible: Boolean,
-    expanded: Boolean,
     currentPage: Int,
     totalPages: Int,
     onlyAuthor: Boolean,
-    onToggle: () -> Unit,
     onReply: () -> Unit,
     onPage: () -> Unit,
     onOnlyAuthor: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    AnimatedVisibility(
-        visible = visible,
-        modifier = modifier,
-        enter = fadeIn() + slideInVertically { it / 2 },
-        exit = fadeOut() + slideOutVertically { it / 2 }
-    ) {
-        Column(horizontalAlignment = Alignment.End) {
-            AnimatedVisibility(
-                visible = expanded,
-                enter = fadeIn() + slideInVertically { it / 4 },
-                exit = fadeOut() + slideOutVertically { it / 4 }
+    val largeText = LocalDensity.current.fontScale >= 1.5f
+    val pageLabel = compactPageLabel(currentPage, totalPages, largeText)
+    NgaGlassSurface(modifier = modifier, shape = RoundedCornerShape(16.dp)) {
+        Row(
+                Modifier.padding(5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                Column(
-                    horizontalAlignment = Alignment.End,
-                    verticalArrangement = Arrangement.spacedBy(9.dp),
-                    modifier = Modifier.padding(bottom = 10.dp)
+                IconButton(onClick = onOnlyAuthor, modifier = Modifier.size(48.dp)) {
+                    Icon(
+                        Icons.Filled.PersonSearch,
+                        contentDescription = if (onlyAuthor) "查看全部回复" else "只看楼主",
+                        tint = if (onlyAuthor) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .widthIn(min = 48.dp, max = 86.dp)
+                        .height(48.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onPage)
+                        .semantics {
+                            contentDescription = "翻页，当前第 $currentPage 页，共 $totalPages 页"
+                            role = Role.Button
+                        },
+                    contentAlignment = Alignment.Center
                 ) {
-                    QuickActionChip(
-                        label = if (onlyAuthor) "查看全部回复" else "只看楼主",
-                        onClick = onOnlyAuthor
+                    Text(
+                        pageLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        modifier = Modifier.padding(horizontal = 6.dp)
+                    )
+                }
+                Surface(
+                    onClick = onReply,
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 11.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
-                        Icon(Icons.Filled.PersonSearch, contentDescription = null, Modifier.size(18.dp))
-                    }
-                    QuickActionChip(
-                        label = "翻页 · $currentPage / $totalPages",
-                        onClick = onPage
-                    ) {
-                        Icon(Icons.Filled.SwapVert, contentDescription = null, Modifier.size(18.dp))
-                    }
-                    QuickActionChip(label = "写回复", onClick = onReply, primary = true) {
-                        Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = null, Modifier.size(18.dp))
+                        Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text("回复", style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }
-
-            val rotation by animateFloatAsState(
-                targetValue = if (expanded) 45f else 0f,
-                label = "帖子快捷菜单"
-            )
-            FloatingActionButton(
-                onClick = onToggle,
-                shape = CircleShape,
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(
-                    Icons.Filled.Add,
-                    contentDescription = if (expanded) "收起帖子操作" else "展开帖子操作",
-                    modifier = Modifier.size(22.dp).graphicsLayer { rotationZ = rotation }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun QuickActionChip(
-    label: String,
-    onClick: () -> Unit,
-    primary: Boolean = false,
-    icon: @Composable () -> Unit
-) {
-    Surface(
-        onClick = onClick,
-        shape = CircleShape,
-        color = if (primary) MaterialTheme.colorScheme.primaryContainer
-        else MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = if (primary) MaterialTheme.colorScheme.onPrimaryContainer
-        else MaterialTheme.colorScheme.onSurfaceVariant,
-        tonalElevation = 6.dp,
-        shadowElevation = 4.dp
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.height(42.dp).padding(start = 14.dp, end = 12.dp)
-        ) {
-            Text(label, style = MaterialTheme.typography.labelLarge)
-            Spacer(Modifier.width(9.dp))
-            icon()
-        }
     }
 }
 
@@ -865,7 +817,6 @@ private fun PostCard(
     onReply: (Post, Boolean) -> Unit,
     onOpenUser: (Post) -> Unit
 ) {
-    val g = LocalGlassPalette.current
     val blocks = renderData?.body.orEmpty()
     val sigBlocks = renderData?.signature.orEmpty()
     val showSignatures = LocalShowSignatures.current
@@ -876,27 +827,29 @@ private fun PostCard(
     Column(
         Modifier.fillMaxWidth()
             .background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = 18.dp, vertical = 16.dp)
+            .padding(horizontal = 20.dp, vertical = if (post.lou == 0) 24.dp else 20.dp)
     ) {
         if (post.lou == 0) {
             Text(
                 post.subject.ifBlank { "（无标题）" },
-                style = MaterialTheme.typography.titleLarge,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
             )
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(20.dp))
         }
         // 作者行
         Row(verticalAlignment = Alignment.CenterVertically) {
             AuthorAvatar(post.avatar, 36.dp)
-            Column(Modifier.padding(start = 10.dp)) {
+            Column(Modifier.weight(1f).padding(start = 10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         formatAuthorName(post.author),
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
                     if (post.lou == 0) {
                         Surface(
@@ -919,7 +872,6 @@ private fun PostCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Spacer(Modifier.weight(1f))
             Text(
                 "#${post.lou}",
                 style = MaterialTheme.typography.labelMedium,
@@ -986,20 +938,20 @@ private fun PostCard(
                 }
             }
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(18.dp))
         // 正文
         blocks.forEach { block -> RenderBlock(block, onImage, onJumpToFloor) }
         // 签名
         if (showSignatures && sigBlocks.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
-            Spacer(Modifier.fillMaxWidth().height(1.dp).background(g.rowDivider))
+            Spacer(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outlineVariant))
             Spacer(Modifier.height(6.dp))
             Column {
                 sigBlocks.forEach { block -> RenderBlock(block, onImage, onJumpToFloor) }
             }
         }
         if (post.comments.isNotEmpty()) {
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(18.dp))
             val commentAccent = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
             Row(
                 Modifier.fillMaxWidth()
@@ -1022,7 +974,7 @@ private fun PostCard(
                         }
                         if (index != post.comments.lastIndex) {
                             Spacer(Modifier.height(8.dp))
-                            Spacer(Modifier.fillMaxWidth().height(1.dp).background(g.rowDivider))
+                            Spacer(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outlineVariant))
                             Spacer(Modifier.height(8.dp))
                         }
                     }
@@ -1081,7 +1033,6 @@ private fun RenderBlock(
     onImage: (String) -> Unit,
     onJumpToFloor: (Int) -> Unit
 ) {
-    val g = LocalGlassPalette.current
     when (block) {
         is PostBlock.Text -> {
             if (block.text.isBlank()) return
@@ -1415,7 +1366,7 @@ private fun RenderBlock(
                     .fillMaxWidth()
                     .padding(vertical = 6.dp)
                     .clip(RoundedCornerShape(0.dp, 8.dp, 8.dp, 0.dp))
-                    .background(g.quoteBg)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
                     .leadingAccent(quoteAccent)
                     .then(
                         if (floor != null) Modifier.clickable { onJumpToFloor(floor) } else Modifier

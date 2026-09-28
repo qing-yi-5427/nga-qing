@@ -16,9 +16,8 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
-import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
-import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -27,34 +26,47 @@ class ThreadHeaderStateTest {
     @Before fun setUp() { Dispatchers.setMain(StandardTestDispatcher()) }
     @After fun tearDown() { Dispatchers.resetMain() }
 
-    @Test fun sourceAndPostSidebarShareHeaderStateButAnotherBoardDoesNot() = runTest {
+    @Test fun sourceAndPostSidebarSharePartialHeaderProgressButAnotherBoardDoesNot() = runTest {
         val repo = repo()
         val saved = SavedStateHandle(mapOf("fid" to "1"))
         val board = ThreadListViewModel(repo, saved)
         runCurrent()
-        val sourceHeader = board.headerVisible
-        val sidebarHeader = board.headerVisible // Both destinations use the source entry's ViewModel.
-        board.setHeaderVisible(false)
+        val sourceHeader = board.headerHiddenFraction
+        val sidebarHeader = board.headerHiddenFraction // Both destinations use the source entry's ViewModel.
+        board.setHeaderHiddenFraction(0.4f)
 
         assertSame(sourceHeader, sidebarHeader)
-        assertFalse(sourceHeader.value)
-        assertFalse(saved.get<Boolean>("thread_header_visible") ?: true)
+        assertEquals(0.4f, sourceHeader.value)
+        assertEquals(0.4f, saved.get<Float>("thread_header_hidden_fraction"))
 
         val restored = ThreadListViewModel(
-            repo, SavedStateHandle(mapOf("fid" to "1", "thread_header_visible" to false))
+            repo, SavedStateHandle(mapOf("fid" to "1", "thread_header_hidden_fraction" to 0.4f))
         )
         val otherBoard = ThreadListViewModel(repo, SavedStateHandle(mapOf("fid" to "2")))
         runCurrent()
-        assertFalse(restored.headerVisible.value)
-        assertTrue(otherBoard.headerVisible.value)
+        assertEquals(0.4f, restored.headerHiddenFraction.value)
+        assertEquals(0f, otherBoard.headerHiddenFraction.value)
+        board.resetScrollPosition()
+        assertEquals(0f, board.headerHiddenFraction.value)
     }
 
-    @Test fun emptyFirstLayoutCannotRevealHeaderButMeasuredTopCan() {
-        assertFalse(shouldRevealHeaderAtTop(0, 0, 0, 0))
-        assertFalse(shouldRevealHeaderAtTop(20, 0, 0, 0))
-        assertTrue(shouldRevealHeaderAtTop(20, 8, 0, 0))
-        assertFalse(shouldRevealHeaderAtTop(20, 8, 1, 0))
-        assertFalse(shouldRevealHeaderAtTop(20, 8, 0, 5))
+    @Test fun headerConsumesOnlyItsOwnTravelInBothDirections() {
+        val middle = consumeHeaderScroll(-40f, 200, 0f)
+        assertEquals(0.2f, middle.hiddenFraction)
+        assertEquals(-40f, middle.consumedY)
+        val hidden = consumeHeaderScroll(-200f, 200, middle.hiddenFraction)
+        assertEquals(1f, hidden.hiddenFraction)
+        assertEquals(-160f, hidden.consumedY) // Remaining -40 px belongs to LazyColumn.
+        val revealed = consumeHeaderScroll(40f, 200, hidden.hiddenFraction)
+        assertEquals(0.8f, revealed.hiddenFraction)
+        assertEquals(40f, revealed.consumedY)
+        assertEquals(0f, consumeHeaderScroll(40f, 0, 0.5f).consumedY)
+    }
+
+    @Test fun legacyHiddenFlagMigratesToFullTravel() = runTest {
+        val restored = ThreadListViewModel(repo(), SavedStateHandle(mapOf("fid" to "1", "thread_header_visible" to false)))
+        runCurrent()
+        assertEquals(1f, restored.headerHiddenFraction.value)
     }
 
     private fun repo(): NgaRepository = mockk<NgaRepository>().also { repo ->

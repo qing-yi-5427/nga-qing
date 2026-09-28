@@ -23,4 +23,25 @@ class NavigationMotionTest {
         assertTrue(isSharedListTransition(Routes.THREADS, Routes.THREADS))
         assertFalse(isSharedListTransition(Routes.BOARDS, Routes.THREADS))
     }
+
+    @Test fun motionKindsKeepTabsAndExpandedSharedChromeStationary() {
+        assertEquals(NavigationMotionKind.ROOT_TAB,
+            navigationMotionKind(Routes.BOARDS, Routes.FAVORITES, expanded = false, hasHinge = false))
+        assertEquals(NavigationMotionKind.CHILD,
+            navigationMotionKind(Routes.THREADS, Routes.POSTS, expanded = false, hasHinge = false))
+        for (pair in listOf(Routes.BOARDS to Routes.THREADS,
+            Routes.THREADS to Routes.POSTS, Routes.BOARDS to Routes.FAVORITES)) {
+            assertEquals(NavigationMotionKind.NONE,
+                navigationMotionKind(pair.first, pair.second, expanded = true, hasHinge = false))
+        }
+        assertEquals(NavigationMotionKind.NONE,
+            navigationMotionKind(Routes.THREADS, Routes.POSTS, expanded = true, hasHinge = true))
+    }
+
+    @Test fun childOffsetIsShortAndMirroredOnReturn() {
+        assertEquals(32, childEnterOffset(width = 1080, distancePx = 32, direction = 1))
+        assertEquals(-32, childEnterOffset(width = 1080, distancePx = 32, direction = -1))
+        assertEquals(20, childEnterOffset(width = 200, distancePx = 32, direction = 1))
+        assertEquals(0, childEnterOffset(width = 0, distancePx = 32, direction = 1))
+    }
 }
