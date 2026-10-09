@@ -97,6 +97,7 @@ import com.qingyi5427.ngaqing.ui.root.RootViewModel
 import com.qingyi5427.ngaqing.ui.gesture.SwipeBackContainer
 import com.qingyi5427.ngaqing.ui.util.formatRelative
 import com.qingyi5427.ngaqing.ui.util.formatAuthorName
+import com.qingyi5427.ngaqing.ui.util.stripHtml
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlin.math.abs
@@ -145,7 +146,7 @@ fun ThreadListScreen(
                 val step = consumeHeaderScroll(available.y, headerHeightPx, viewModel.headerHiddenFraction.value)
                 if (step.consumedY == 0f) return Offset.Zero
                 viewModel.setHeaderHiddenFraction(step.hiddenFraction)
-                // The header consumes exactly its travel, so the first list row moves
+                // The tools consume exactly their travel, so the first list row moves
                 // once at the finger's speed instead of scrolling twice.
                 return Offset(0f, step.consumedY)
             }
@@ -193,23 +194,16 @@ fun ThreadListScreen(
         onBack = { nav.popBackStack() },
         customGestureTopInset = 120.dp
     ) {
-        Layout(
+        Column(
             modifier = Modifier.fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
                 .statusBarsPadding()
                 .navigationBarsPadding()
-                .nestedScroll(headerScrollConnection)
-                .clipToBounds(),
-            content = {
-                Column(
-                    Modifier.onSizeChanged { headerHeightPx = it.height }
-                        // The header itself remains a drag surface when a short window leaves
-                        // little or no list viewport. The parent consumes the same travel.
-                        .scrollable(rememberScrollableState { 0f }, Orientation.Vertical)
-                        .testTag("thread-header")
-                ) {
+                .clipToBounds()
+        ) {
+            Box(Modifier.testTag("thread-top-bar")) {
                     AppTopBar(
-                        title = "NGA 清漪",
+                        title = stripHtml(viewModel.name),
                         windowInsets = WindowInsets(0, 0, 0, 0),
                         onTitleClick = {
                             viewModel.setHeaderHiddenFraction(0f)
@@ -244,8 +238,20 @@ fun ThreadListScreen(
                             }
                         }
                     )
+            }
+            Layout(
+                modifier = Modifier.fillMaxWidth().weight(1f)
+                    .nestedScroll(headerScrollConnection)
+                    .clipToBounds(),
+                content = {
+                Column(
+                    Modifier.onSizeChanged { headerHeightPx = it.height }
+                        // The tools remain a drag surface when a short window leaves
+                        // little or no list viewport. The parent consumes the same travel.
+                        .scrollable(rememberScrollableState { 0f }, Orientation.Vertical)
+                        .testTag("thread-header")
+                ) {
                     ForumLevelNavigation(
-                        boardName = viewModel.name,
                         subBoards = subBoards,
                         selectedBoardKey = boardIdentityKey(viewModel.fid, viewModel.stid),
                         recommendedOnly = recommendedOnly,
@@ -374,13 +380,13 @@ fun ThreadListScreen(
                 list.place(0, header.height - hidden)
             }
         }
+        }
     }
 }
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 private fun ForumLevelNavigation(
-    boardName: String,
     subBoards: List<Board>,
     selectedBoardKey: String,
     recommendedOnly: Boolean,
@@ -394,12 +400,6 @@ private fun ForumLevelNavigation(
 ) {
     var boardSheetOpen by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
-        Text(
-            boardName,
-            style = MaterialTheme.typography.headlineMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 5.dp)
-        )
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp),

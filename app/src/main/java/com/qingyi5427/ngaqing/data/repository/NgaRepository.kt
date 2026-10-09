@@ -693,10 +693,13 @@ class NgaRepository @Inject constructor(
         withContext(Dispatchers.Default) { parseCommunityItems(raw, "私信") }
     }.also { it.exceptionOrNull()?.let { error -> if (error is CancellationException) throw error } }
 
-    suspend fun userProfile(uid: String): Result<UserProfile> = runCatching {
-        val session = captureSession()
-        val raw = api.userInfo(uid = uid, session = session)
-        requireCurrent(session)
+    suspend fun userProfile(
+        uid: String,
+        session: RequestPreferences? = null
+    ): Result<UserProfile> = runCatching {
+        val requestSession = requireSession(session)
+        val raw = api.userInfo(uid = uid, session = requestSession)
+        requireCurrent(requestSession)
         withContext(Dispatchers.Default) {
             val root = JSONObject(preprocess(raw))
             val data = root.optJSONObject("data") ?: throw IllegalStateException(errorOf(root, root.toString()))

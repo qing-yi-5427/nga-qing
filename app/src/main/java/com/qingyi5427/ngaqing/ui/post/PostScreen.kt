@@ -8,7 +8,13 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
@@ -107,6 +113,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -136,6 +143,7 @@ import com.qingyi5427.ngaqing.data.model.Post
 import com.qingyi5427.ngaqing.data.local.NgaDomains
 import com.qingyi5427.ngaqing.data.remote.NgaInterceptor
 import com.qingyi5427.ngaqing.ui.Routes
+import com.qingyi5427.ngaqing.ui.chrome.rememberScrollDockState
 import com.qingyi5427.ngaqing.ui.design.NgaBackdropScope
 import com.qingyi5427.ngaqing.ui.design.NgaGlassSurface
 import com.qingyi5427.ngaqing.ui.design.ngaBackdropSource
@@ -143,6 +151,7 @@ import com.qingyi5427.ngaqing.ui.theme.LocalShowSignatures
 import com.qingyi5427.ngaqing.ui.gesture.SwipeBackContainer
 import com.qingyi5427.ngaqing.ui.util.formatAuthorName
 import com.qingyi5427.ngaqing.ui.util.formatRelative
+import com.qingyi5427.ngaqing.ui.util.stripHtml
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -174,6 +183,7 @@ fun PostScreen(
     val viewerUrl = remember { mutableStateOf<String?>(null) }
     val webFallback = rememberSaveable { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    val dockState = rememberScrollDockState()
     val ctx = LocalContext.current
 
     var replyOpen by rememberSaveable { mutableStateOf(false) }
@@ -268,10 +278,11 @@ fun PostScreen(
             Modifier.fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
                 .navigationBarsPadding()
+                .nestedScroll(dockState.nestedScrollConnection)
         ) {
         Column(Modifier.fillMaxSize()) {
         com.qingyi5427.ngaqing.ui.chrome.AppTopBar(
-            title = "帖子",
+            title = stripHtml(subject),
             onTitleClick = {
                 scope.launch { listState.animateScrollToItem(0) }
             },
@@ -366,6 +377,20 @@ fun PostScreen(
                 }
             }
         )
+        if (webFallback.value) {
+            // A WebView rendered inside the pull-to-refresh haze source gets captured into
+            // another GPU layer. On long NGA pages Chromium can run out of tile memory and
+            // repeatedly paint an empty frame, so let the WebView own its content area.
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                if (webCookiesReady) {
+                    WebPageView(viewModel.tid, ngaDomain)
+                } else {
+                    Box(Modifier.fillMaxSize(), Alignment.Center) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    }
+                }
+            }
+        } else {
         PullToRefreshBox(
             isRefreshing = isRefreshing,
             onRefresh = viewModel::refresh,
@@ -375,19 +400,7 @@ fun PostScreen(
                 is PostUiState.Loading -> Box(Modifier.fillMaxSize(), Alignment.Center) {
                     CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                 }
-                is PostUiState.Error -> {
-                    if (webFallback.value) {
-                        if (webCookiesReady) {
-                            WebPageView(viewModel.tid, ngaDomain)
-                        } else {
-                            Box(Modifier.fillMaxSize(), Alignment.Center) {
-                                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                            }
-                        }
-                    } else {
-                        ErrorView(cur.msg, cur.raw) { webFallback.value = true }
-                    }
-                }
+                is PostUiState.Error -> ErrorView(cur.msg, cur.raw) { webFallback.value = true }
                 is PostUiState.Success -> {
                     val posts = cur.posts
                     LazyColumn(
@@ -484,7 +497,8 @@ fun PostScreen(
             }
         }
         }
-        val readingState = s as? PostUiState.Success
+        }
+        val readingState = if (webFallback.value) null else s as? PostUiState.Success
         if (readingState != null && readingState.posts.isNotEmpty()) {
             val readingPage by remember(readingState.posts, readingState.page, readingState.totalPages, readingState.fromCache) {
                 derivedStateOf {
@@ -497,6 +511,13 @@ fun PostScreen(
                     )
                 }
             }
+            AnimatedVisibility(
+                visible = dockState.visible,
+                modifier = Modifier.align(Alignment.BottomEnd)
+                    .padding(end = 16.dp, bottom = 14.dp),
+                enter = fadeIn(tween(180)) + slideInVertically(tween(180)) { it / 2 },
+                exit = fadeOut(tween(180)) + slideOutVertically(tween(180)) { it / 2 }
+            ) {
             PostQuickActions(
                 currentPage = readingPage,
                 totalPages = readingState.totalPages,
@@ -512,10 +533,9 @@ fun PostScreen(
                 },
                 onOnlyAuthor = {
                     viewModel.toggleOnlyAuthor()
-                },
-                modifier = Modifier.align(Alignment.BottomEnd)
-                    .padding(end = 16.dp, bottom = 14.dp)
+                }
             )
+            }
         }
         }
         }
@@ -752,7 +772,7 @@ private fun PostQuickActions(
 ) {
     val largeText = LocalDensity.current.fontScale >= 1.5f
     val pageLabel = compactPageLabel(currentPage, totalPages, largeText)
-    NgaGlassSurface(modifier = modifier, shape = RoundedCornerShape(16.dp)) {
+    NgaGlassSurface(modifier = modifier.testTag("post-quick-actions"), shape = RoundedCornerShape(16.dp)) {
         Row(
                 Modifier.padding(5.dp),
                 verticalAlignment = Alignment.CenterVertically,

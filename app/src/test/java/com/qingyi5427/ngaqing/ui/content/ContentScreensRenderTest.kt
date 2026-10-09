@@ -12,13 +12,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasScrollToIndexAction
@@ -26,12 +29,17 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
@@ -90,9 +98,15 @@ class ContentScreensRenderTest {
         every { vm.initialScrollIndex } returns 0
         every { vm.initialScrollOffset } returns 0
         render { nav -> BoardScreen(nav, vm, showBottomBar = false, selectedBoardKey = "fid:10") }
+        compose.onAllNodesWithText("版块目录").assertCountEquals(1)
+        val titleBottom = compose.onNodeWithText("版块目录").getUnclippedBoundsInRoot().bottom
+        check(compose.onNodeWithText("分类").getUnclippedBoundsInRoot().top >= titleBottom)
         compose.onNodeWithText("版块 A").assertIsDisplayed().assertIsSelected()
         compose.onNodeWithText("版块 B").assertIsDisplayed().assertIsNotSelected()
         compose.onNodeWithText("版块说明").assertIsDisplayed()
+        compose.onNodeWithContentDescription("全站搜索").assertIsDisplayed()
+        compose.onNodeWithText("搜索全站主题").assertDoesNotExist()
+        compose.onNodeWithText("2 个版块 · 找到感兴趣的讨论").assertDoesNotExist()
         screenshot("board-phone-light.png")
         compose.runOnUiThread { state.value = BoardUiState.Success(emptyList()) }
         compose.onNodeWithText("暂无版块").assertIsDisplayed()
@@ -103,6 +117,71 @@ class ContentScreensRenderTest {
         compose.onNodeWithText("无法连接").assertIsDisplayed()
         compose.onNodeWithText("重试").performClick()
         verify { vm.load() }
+    }
+
+    @Test fun boardDockHidesOnScrollAndNoLongerReceivesBottomTap() {
+        val boardCount = 20
+        val vm = mockk<BoardViewModel>(relaxed = true)
+        every { vm.uiState } returns MutableStateFlow<BoardUiState>(BoardUiState.Success(
+            listOf(BoardGroup("分类", "分类", children = (1..boardCount).map {
+                Board("$it", "讨论版块 $it")
+            }))
+        ))
+        every { vm.favoriteBoards } returns MutableStateFlow<List<Board>>(emptyList())
+        every { vm.isRefreshing } returns MutableStateFlow(false)
+        every { vm.initialScrollIndex } returns 0
+        every { vm.initialScrollOffset } returns 0
+        render { nav ->
+            NavHost(navController = nav, startDestination = Routes.BOARDS) {
+                composable(Routes.BOARDS) { BoardScreen(nav, vm) }
+                composable(Routes.PROFILE) { Text("个人页目标") }
+            }
+        }
+        val profileTab = compose.onNodeWithTag("root-tab-${Routes.PROFILE}")
+            .assertIsDisplayed().getUnclippedBoundsInRoot()
+        val density = compose.activity.resources.displayMetrics.density
+        val formerTabCenter = Offset(
+            (profileTab.left.value + profileTab.right.value) * density / 2f,
+            (profileTab.top.value + profileTab.bottom.value) * density / 2f
+        )
+        val list = compose.onNode(hasScrollToIndexAction())
+        list.performTouchInput { swipeUp() }
+        compose.onNodeWithTag("root-tab-${Routes.PROFILE}").assertDoesNotExist()
+        list.performScrollToIndex(boardCount) // The category header precedes the last board.
+        compose.onRoot().performTouchInput { click(formerTabCenter) }
+        compose.onNodeWithText("个人页目标").assertDoesNotExist()
+        list.performTouchInput { swipeDown() }
+        compose.onNodeWithTag("root-tab-${Routes.PROFILE}").assertIsDisplayed()
+    }
+
+    @Test fun favoriteDockHidesAtShortListBoundaryAndReappearsOnReverseSwipe() {
+        val vm = mockk<FavoritesViewModel>(relaxed = true)
+        every { vm.favorites } returns MutableStateFlow(listOf(FavoriteEntity("1", "收藏主题", "10", "作者")))
+        every { vm.folders } returns MutableStateFlow<List<String>>(emptyList())
+        every { vm.syncing } returns MutableStateFlow(false)
+        every { vm.syncMessage } returns MutableStateFlow<String?>(null)
+        every { vm.syncError } returns MutableStateFlow<String?>(null)
+        every { vm.actionError } returns MutableStateFlow<String?>(null)
+        render { nav ->
+            NavHost(navController = nav, startDestination = Routes.FAVORITES) {
+                composable(Routes.FAVORITES) { FavoritesScreen(nav, vm) }
+                composable(Routes.PROFILE) { Text("个人页目标") }
+            }
+        }
+        val profileTab = compose.onNodeWithTag("root-tab-${Routes.PROFILE}")
+            .assertIsDisplayed().getUnclippedBoundsInRoot()
+        val density = compose.activity.resources.displayMetrics.density
+        val formerTabCenter = Offset(
+            (profileTab.left.value + profileTab.right.value) * density / 2f,
+            (profileTab.top.value + profileTab.bottom.value) * density / 2f
+        )
+        val list = compose.onNode(hasScrollToIndexAction())
+        list.performTouchInput { swipeUp() }
+        compose.onNodeWithTag("root-tab-${Routes.PROFILE}").assertDoesNotExist()
+        compose.onRoot().performTouchInput { click(formerTabCenter) }
+        compose.onNodeWithText("个人页目标").assertDoesNotExist()
+        list.performTouchInput { swipeDown() }
+        compose.onNodeWithTag("root-tab-${Routes.PROFILE}").assertIsDisplayed()
     }
 
     @Test fun favoritesKeepsRowsFiltersAndFailureActions() {
@@ -119,6 +198,8 @@ class ContentScreensRenderTest {
         render(themeMode = "dark") { nav -> FavoritesScreen(nav, vm) }
         compose.onNodeWithText("收藏主题").assertIsDisplayed()
         compose.onNodeWithText("全部").assertIsDisplayed()
+        compose.onNodeWithContentDescription("搜索收藏").assertIsDisplayed()
+        compose.onNodeWithText("按分组整理你的收藏", substring = true).assertDoesNotExist()
         compose.onNodeWithContentDescription("取消收藏 收藏主题").assertIsDisplayed()
         screenshot("favorites-phone-dark.png")
         compose.runOnUiThread { rows.value = emptyList() }
@@ -173,8 +254,9 @@ class ContentScreensRenderTest {
                 composable(Routes.BOARDS) { Text("版块页目标") }
             }
         }
+        compose.onNodeWithContentDescription("搜索收藏").performClick()
         val search = compose.onAllNodes(hasSetTextAction()).onFirst()
-        search.performScrollTo().performTextInput("甲")
+        search.performTextInput("甲")
         search.assertIsFocused()
         compose.runOnUiThread { rows.value = emptyList() }
         search.assertIsFocused()
@@ -183,6 +265,9 @@ class ContentScreensRenderTest {
         search.assertIsFocused()
         search.performTextInput("丙")
         verify { vm.setQuery(match { it.contains("甲") && it.contains("乙") && it.contains("丙") }) }
+        compose.onNodeWithText("完成").performClick()
+        compose.onNodeWithText("清除搜索：甲乙丙").assertIsDisplayed().performClick()
+        verify { vm.setQuery("") }
         compose.onNodeWithText("我的").assertIsDisplayed().performClick()
         compose.onNodeWithText("个人页目标").assertIsDisplayed()
     }
@@ -195,6 +280,11 @@ class ContentScreensRenderTest {
         compose.onNodeWithText("历史主题").assertIsDisplayed()
         compose.onNodeWithContentDescription("删除浏览记录 历史主题").assertIsDisplayed()
         screenshot("history-phone-light.png")
+        compose.onNodeWithContentDescription("搜索浏览历史").performClick()
+        compose.onAllNodes(hasSetTextAction()).onFirst().performTextInput("路线")
+        compose.onNodeWithText("完成").performClick()
+        compose.onNodeWithText("清除搜索：路线").assertIsDisplayed().performClick()
+        verify { vm.setQuery("") }
         compose.onNodeWithContentDescription("清空历史").performClick()
         compose.onNodeWithText("清空浏览历史？").assertIsDisplayed()
         compose.onNodeWithText("取消").performClick()
@@ -209,6 +299,9 @@ class ContentScreensRenderTest {
         val vm = mockk<SearchViewModel>(relaxed = true)
         every { vm.uiState } returns state
         render(themeMode = "dark") { nav -> SearchScreen(nav, fid = null, stid = null, viewModel = vm) }
+        compose.onNodeWithText("全站搜索").assertIsDisplayed()
+        compose.onAllNodes(hasSetTextAction()).onFirst().assertIsDisplayed()
+        compose.onNodeWithText("搜索讨论").assertDoesNotExist()
         compose.onNodeWithText("搜索结果").assertIsDisplayed()
         compose.onNodeWithText("当前显示离线搜索结果").assertIsDisplayed()
         screenshot("search-phone-dark.png")
@@ -351,7 +444,7 @@ class ContentScreensRenderTest {
         ))
         every { vm.favoriteBoards } returns MutableStateFlow<List<Board>>(emptyList())
         every { vm.isRefreshing } returns MutableStateFlow(false)
-        every { vm.initialScrollIndex } returns 8
+        every { vm.initialScrollIndex } returns 6
         every { vm.initialScrollOffset } returns 0
         val wide = mutableStateOf(true)
         render { nav ->

@@ -1,5 +1,11 @@
 package com.qingyi5427.ngaqing.ui.chrome
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.verticalScroll
@@ -132,7 +138,7 @@ fun AppTopBar(
 
 /** Compact root navigation floats over the content; callers place it in a root Box overlay. */
 @Composable
-fun AppBottomBar(nav: NavHostController, currentRoute: String) {
+fun AppBottomBar(nav: NavHostController, currentRoute: String, visible: Boolean = true) {
     if (LocalRootNavigationRail.current) return
     Box(
         Modifier.fillMaxWidth()
@@ -140,42 +146,48 @@ fun AppBottomBar(nav: NavHostController, currentRoute: String) {
             .padding(bottom = 12.dp),
         contentAlignment = Alignment.Center
     ) {
-        NgaGlassSurface(shape = RoundedCornerShape(24.dp)) {
-            Row(
-                Modifier.padding(5.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                tabs.forEach { tab ->
-                    val selected = currentRoute == tab.route
-                    Column(
-                        Modifier.width(70.dp).height(56.dp)
-                            .testTag("root-tab-${tab.route}")
-                            .background(
-                                if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.82f)
-                                else Color.Transparent,
-                                RoundedCornerShape(18.dp)
+        AnimatedVisibility(
+            visible = visible,
+            enter = fadeIn(tween(180)) + slideInVertically(tween(180)) { it / 2 },
+            exit = fadeOut(tween(180)) + slideOutVertically(tween(180)) { it / 2 }
+        ) {
+            NgaGlassSurface(modifier = Modifier.testTag("root-bottom-dock"), shape = RoundedCornerShape(24.dp)) {
+                Row(
+                    Modifier.padding(5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    tabs.forEach { tab ->
+                        val selected = currentRoute == tab.route
+                        Column(
+                            Modifier.width(70.dp).height(56.dp)
+                                .testTag("root-tab-${tab.route}")
+                                .background(
+                                    if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.82f)
+                                    else Color.Transparent,
+                                    RoundedCornerShape(18.dp)
+                                )
+                                .selectable(selected = selected, role = Role.Tab, onClick = {
+                                    if (!selected) nav.openRootTab(tab.route)
+                                }),
+                            verticalArrangement = Arrangement.Center,
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                if (selected) tab.selectedIcon else tab.icon,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                                tint = if (selected) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            .selectable(selected = selected, role = Role.Tab, onClick = {
-                                if (!selected) nav.openRootTab(tab.route)
-                            }),
-                        verticalArrangement = Arrangement.Center,
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            if (selected) tab.selectedIcon else tab.icon,
-                            contentDescription = null,
-                            modifier = Modifier.size(20.dp),
-                            tint = if (selected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            tab.label,
-                            fontSize = 10.sp,
-                            maxLines = 1,
-                            color = if (selected) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                            Text(
+                                tab.label,
+                                fontSize = 10.sp,
+                                maxLines = 1,
+                                color = if (selected) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }

@@ -24,8 +24,9 @@ import javax.inject.Singleton
 import org.json.JSONArray
 import org.json.JSONObject
 
-data class SavedAccount(val uid: String, val cid: String, val username: String)
+data class SavedAccount(val uid: String, val cid: String, val username: String, val avatar: String = "")
 data class RequestPreferences(val uid: String, val cid: String, val ngaDomain: String, val revision: Long = 0L)
+data class AccountDisplay(val uid: String = "", val username: String = "", val avatar: String = "", val revision: Long = 0L)
 
 private val Context.dataStore by preferencesDataStore("user_prefs")
 
@@ -48,6 +49,10 @@ class UserPreferences @Inject constructor(
     val uid: Flow<String> = ds.data.map { it[KEY_UID].orEmpty() }
     val cid: Flow<String> = ds.data.map { it[KEY_CID].orEmpty() }
     val uname: Flow<String> = ds.data.map { it[KEY_UNAME].orEmpty() }
+    val accountDisplay: Flow<AccountDisplay> = ds.data.map {
+        AccountDisplay(it[KEY_UID].orEmpty(), it[KEY_UNAME].orEmpty(), it[KEY_AVATAR].orEmpty(),
+            it[KEY_SESSION_REVISION] ?: 0L)
+    }
     val isLoggedIn: Flow<Boolean> = ds.data.map { !it[KEY_UID].isNullOrBlank() && !it[KEY_CID].isNullOrBlank() }
 
     val themeMode: Flow<String> = ds.data.map { it[KEY_THEME] ?: "system" }
@@ -77,15 +82,49 @@ class UserPreferences @Inject constructor(
 
     suspend fun saveAuth(uid: String, cid: String, uname: String) {
         val updated = ds.edit {
+            val previous = parseAccounts(it[KEY_ACCOUNTS]).firstOrNull { account -> account.uid == uid }
+            val username = uname.takeIf { value -> value.isNotBlank() && value != uid }
+                ?: previous?.username?.takeIf(String::isNotBlank)
+                ?: if (it[KEY_UID] == uid) it[KEY_UNAME].orEmpty() else ""
+            val avatar = previous?.avatar?.takeIf(String::isNotBlank)
+                ?: if (it[KEY_UID] == uid) it[KEY_AVATAR].orEmpty() else ""
             it[KEY_UID] = uid
             it[KEY_CID] = cid
-            it[KEY_UNAME] = uname
+            it[KEY_UNAME] = username
+            it[KEY_AVATAR] = avatar
             val accounts = parseAccounts(it[KEY_ACCOUNTS]).filterNot { account -> account.uid == uid } +
-                SavedAccount(uid, cid, uname)
+                SavedAccount(uid, cid, username, avatar)
             it[KEY_ACCOUNTS] = encodeAccounts(accounts)
             it[KEY_SESSION_REVISION] = (it[KEY_SESSION_REVISION] ?: 0L) + 1L
         }
         updateCachedRequestPreferences(updated.toRequestPreferences())
+    }
+
+    /** Profile responses belong to the request's original session, including its revision. */
+    suspend fun saveProfileIfCurrent(
+        session: RequestPreferences,
+        profileUid: String,
+        username: String,
+        avatar: String
+    ): Boolean {
+        var saved = false
+        ds.edit {
+            if (session.uid.isBlank() || profileUid != session.uid ||
+                it[KEY_UID] != session.uid || it[KEY_CID] != session.cid ||
+                (it[KEY_SESSION_REVISION] ?: 0L) != session.revision) return@edit
+            val existing = parseAccounts(it[KEY_ACCOUNTS])
+            val account = existing.firstOrNull { entry -> entry.uid == session.uid }
+                ?: SavedAccount(session.uid, session.cid, it[KEY_UNAME].orEmpty(), it[KEY_AVATAR].orEmpty())
+            val safeName = username.trim().takeIf { value -> value.isNotBlank() && value != session.uid }
+                ?: account.username.ifBlank { it[KEY_UNAME].orEmpty() }
+            val safeAvatar = avatar.trim().ifBlank { account.avatar.ifBlank { it[KEY_AVATAR].orEmpty() } }
+            it[KEY_UNAME] = safeName
+            it[KEY_AVATAR] = safeAvatar
+            it[KEY_ACCOUNTS] = encodeAccounts(existing.filterNot { entry -> entry.uid == session.uid } +
+                account.copy(username = safeName, avatar = safeAvatar))
+            saved = true
+        }
+        return saved
     }
 
     suspend fun clearAuth() {
@@ -99,6 +138,7 @@ class UserPreferences @Inject constructor(
             it.remove(KEY_UID)
             it.remove(KEY_CID)
             it.remove(KEY_UNAME)
+            it.remove(KEY_AVATAR)
             it[KEY_SESSION_REVISION] = (it[KEY_SESSION_REVISION] ?: 0L) + 1L
         }
         updateCachedRequestPreferences(updated.toRequestPreferences())
@@ -112,6 +152,7 @@ class UserPreferences @Inject constructor(
                 it[KEY_UID] = account.uid
                 it[KEY_CID] = account.cid
                 it[KEY_UNAME] = account.username
+                it[KEY_AVATAR] = account.avatar
                 switched = true
                 it[KEY_SESSION_REVISION] = (it[KEY_SESSION_REVISION] ?: 0L) + 1L
             }
@@ -129,6 +170,7 @@ class UserPreferences @Inject constructor(
                 it.remove(KEY_UID)
                 it.remove(KEY_CID)
                 it.remove(KEY_UNAME)
+                it.remove(KEY_AVATAR)
                 it[KEY_SESSION_REVISION] = (it[KEY_SESSION_REVISION] ?: 0L) + 1L
             }
         }
@@ -176,7 +218,7 @@ class UserPreferences @Inject constructor(
                 val uid = item.optString("uid")
                 val cid = item.optString("cid")
                 if (uid.isNotBlank() && cid.isNotBlank()) {
-                    add(SavedAccount(uid, cid, item.optString("username")))
+                    add(SavedAccount(uid, cid, item.optString("username"), item.optString("avatar")))
                 }
             }
         }
@@ -188,6 +230,7 @@ class UserPreferences @Inject constructor(
                 put("uid", account.uid)
                 put("cid", account.cid)
                 put("username", account.username)
+                put("avatar", account.avatar)
             })
         }
     }.toString()
@@ -204,6 +247,7 @@ class UserPreferences @Inject constructor(
         val KEY_UID = stringPreferencesKey("uid")
         val KEY_CID = stringPreferencesKey("cid")
         val KEY_UNAME = stringPreferencesKey("uname")
+        val KEY_AVATAR = stringPreferencesKey("avatar")
         val KEY_THEME = stringPreferencesKey("theme")
         val KEY_NGA_DOMAIN = stringPreferencesKey("nga_domain")
         val KEY_READING_TEXT_SCALE = floatPreferencesKey("reading_text_scale")

@@ -3,6 +3,9 @@ package com.qingyi5427.ngaqing.ui.secondary
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebView
+import android.graphics.Color
+import androidx.core.view.drawToBitmap
+import java.util.concurrent.atomic.AtomicReference
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -19,6 +22,10 @@ import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
@@ -27,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.rememberNavController
 import com.qingyi5427.ngaqing.data.local.NgaDomains
+import com.qingyi5427.ngaqing.data.local.AccountDisplay
 import com.qingyi5427.ngaqing.data.local.SavedAccount
 import com.qingyi5427.ngaqing.data.local.WatchedThreadEntity
 import com.qingyi5427.ngaqing.data.model.CommunityItem
@@ -42,6 +50,7 @@ import com.qingyi5427.ngaqing.ui.login.LoginState
 import com.qingyi5427.ngaqing.ui.login.LoginViewModel
 import com.qingyi5427.ngaqing.ui.profile.ProfileScreen
 import com.qingyi5427.ngaqing.ui.root.RootViewModel
+import com.qingyi5427.ngaqing.ui.root.ProfileLoadState
 import com.qingyi5427.ngaqing.ui.settings.SettingsScreen
 import com.qingyi5427.ngaqing.ui.settings.SettingsViewModel
 import com.qingyi5427.ngaqing.ui.theme.NgaQingTheme
@@ -56,6 +65,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Rule
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -180,6 +190,9 @@ class SecondaryScreensRenderTest {
         val model = mockk<RootViewModel>(relaxed = true) {
             every { userName } returns MutableStateFlow("一位名字很长的论坛用户")
             every { userId } returns MutableStateFlow("123456")
+            every { accountDisplay } returns MutableStateFlow(
+                AccountDisplay("123456", "一位名字很长的论坛用户", "", 1L))
+            every { profileLoad } returns MutableStateFlow(ProfileLoadState())
         }
         render(mode = "dark", fontScale = 1.3f) { ProfileScreen(it, root = model) }
         compose.onNodeWithText("UID 123456").assertIsDisplayed()
@@ -187,6 +200,80 @@ class SecondaryScreensRenderTest {
         compose.onNodeWithText("消息与关注").assertIsDisplayed()
         compose.onNodeWithText("设置与阅读偏好").performScrollTo().assertIsDisplayed()
         screenshot("secondary-profile-320-dark-large-font.png")
+    }
+
+    @Test
+    fun profileReplacesLegacyPlaceholderAndOffersRefreshRetry() {
+        val display = MutableStateFlow(AccountDisplay("123457", "", "", 7L))
+        val load = MutableStateFlow(ProfileLoadState())
+        val model = mockk<RootViewModel>(relaxed = true) {
+            every { accountDisplay } returns display
+            every { profileLoad } returns load
+        }
+        render { ProfileScreen(it, root = model) }
+        compose.onNodeWithText("NGA 用户").assertIsDisplayed()
+        compose.onNodeWithText("UID 123457").assertIsDisplayed()
+
+        compose.runOnUiThread {
+            display.value = display.value.copy(username = "恢复的用户")
+            load.value = ProfileLoadState("123457", 7L, error = "暂时无法更新用户资料")
+        }
+        compose.onNodeWithText("恢复的用户").assertIsDisplayed()
+        compose.onNodeWithText("资料更新失败，重试").performClick()
+        verify(atLeast = 1) { model.refreshOwnProfile() }
+    }
+
+    @Test
+    fun profileLoadsLocalAvatarAndRendersItOverPlaceholder() {
+        // The bundled public PNG has orange pixels; the profile placeholder and theme do not.
+        val avatar = "android.resource://${compose.activity.packageName}/drawable/ic_launcher_foreground"
+        val imageFailure = AtomicReference<Throwable?>()
+        val model = mockk<RootViewModel>(relaxed = true) {
+            every { accountDisplay } returns MutableStateFlow(
+                AccountDisplay("123458", "头像测试用户", avatar, 8L))
+            every { profileLoad } returns MutableStateFlow(ProfileLoadState())
+        }
+        render { ProfileScreen(it, root = model, onAvatarLoadError = imageFailure::set) }
+        compose.waitUntil(5_000) {
+            runCatching { compose.onNodeWithTag("profile-avatar-loaded").assertExists(); true }
+                .getOrDefault(false) ||
+                runCatching { compose.onNodeWithTag("profile-avatar-failed").assertExists(); true }
+                    .getOrDefault(false)
+        }
+        screenshot("secondary-profile-local-avatar-loaded.png")
+        assertTrue("Coil failed for bundled avatar fixture: " +
+            "${imageFailure.get()?.javaClass?.simpleName}: ${imageFailure.get()?.message}",
+            runCatching { compose.onNodeWithTag("profile-avatar-loaded").assertExists(); true }
+                .getOrDefault(false))
+        val image = compose.runOnUiThread { compose.activity.window.decorView.drawToBitmap() }
+        val visibleOrangePixel = (0 until image.height / 2).any { y ->
+            (0 until image.width).any { x ->
+                val pixel = image.getPixel(x, y)
+                Color.red(pixel) > 190 && Color.green(pixel) in 65..180 && Color.blue(pixel) < 80
+            }
+        }
+        assertTrue("Loaded avatar must be visible in the native frame", visibleOrangePixel)
+    }
+
+    @Test
+    fun profileDockHidesOnUserScrollAndReturnsOnReverseScroll() {
+        val model = mockk<RootViewModel>(relaxed = true) {
+            every { accountDisplay } returns MutableStateFlow(
+                AccountDisplay("123459", "滑动测试用户", "", 9L))
+            every { profileLoad } returns MutableStateFlow(ProfileLoadState())
+        }
+        render { ProfileScreen(it, root = model) }
+        compose.onNodeWithTag("root-bottom-dock").assertIsDisplayed()
+        compose.onNodeWithTag("profile-scroll").performTouchInput { swipeUp() }
+        compose.waitUntil(3_000) {
+            runCatching {
+                compose.onNodeWithTag("root-bottom-dock").assertDoesNotExist()
+                true
+            }.getOrDefault(false)
+        }
+        compose.onNodeWithTag("root-bottom-dock").assertDoesNotExist()
+        compose.onNodeWithTag("profile-scroll").performTouchInput { swipeDown() }
+        compose.onNodeWithTag("root-bottom-dock").assertIsDisplayed()
     }
 
     @Test
@@ -320,6 +407,9 @@ class SecondaryScreensRenderTest {
         val model = mockk<RootViewModel>(relaxed = true) {
             every { userName } returns MutableStateFlow("一位名字很长的论坛用户")
             every { userId } returns MutableStateFlow("123456")
+            every { accountDisplay } returns MutableStateFlow(
+                AccountDisplay("123456", "一位名字很长的论坛用户", "", 1L))
+            every { profileLoad } returns MutableStateFlow(ProfileLoadState())
         }
         render { ProfileScreen(it, root = model) }
         compose.onNodeWithText("一位名字很长的论坛用户").assertIsDisplayed()

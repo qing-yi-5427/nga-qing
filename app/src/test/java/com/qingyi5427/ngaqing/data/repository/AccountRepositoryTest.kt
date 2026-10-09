@@ -105,6 +105,19 @@ class AccountRepositoryTest {
         db.close()
     }
 
+    @Test fun ownProfileUsesCapturedSessionAndDecodesAvatar() = runBlocking {
+        prefs.saveAuth("profile-fixture-401", "fixture-cid-401", "")
+        val session = repo.captureSession()
+        coEvery { api.userInfo(uid = session.uid, session = session) } returns
+            """{"data":{"0":{"uid":"profile-fixture-401","username":"示例昵称","avatar":"//img.nga.cn/example.png"}}}"""
+
+        val profile = repo.userProfile(session.uid, session).getOrThrow()
+        assertEquals(session.uid, profile.uid)
+        assertEquals("示例昵称", profile.username)
+        assertEquals("https://img.nga.cn/example.png", profile.avatar)
+        db.close()
+    }
+
     private fun threadPage(tid: String, title: String, total: Int = 1): String =
         """{"data":{"__ROWS":$total,"__T":{"0":{"tid":"$tid","subject":"$title","author":"author","authorid":"42","postdate":1,"replies":0}}}}"""
 }

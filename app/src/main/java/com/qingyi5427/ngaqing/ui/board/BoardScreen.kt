@@ -65,6 +65,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalDensity
@@ -88,6 +89,7 @@ import com.qingyi5427.ngaqing.ui.Routes
 import com.qingyi5427.ngaqing.ui.chrome.AppBottomBar
 import com.qingyi5427.ngaqing.ui.chrome.AppTopBar
 import com.qingyi5427.ngaqing.ui.chrome.LocalRootNavigationRail
+import com.qingyi5427.ngaqing.ui.chrome.rememberScrollDockState
 import com.qingyi5427.ngaqing.ui.design.NgaStatePanel
 import com.qingyi5427.ngaqing.ui.design.NgaBackdropScope
 import com.qingyi5427.ngaqing.ui.design.ngaBackdropSource
@@ -107,6 +109,7 @@ fun BoardScreen(
     val favoriteBoards by viewModel.favoriteBoards.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     val hasDock = showBottomBar && !LocalRootNavigationRail.current
+    val dockState = rememberScrollDockState()
     val listState = remember(viewModel) {
         LazyListState(viewModel.initialScrollIndex, viewModel.initialScrollOffset)
     }
@@ -133,12 +136,13 @@ fun BoardScreen(
     NgaBackdropScope {
     Box(
         Modifier.fillMaxSize()
+            .then(if (hasDock) Modifier.nestedScroll(dockState.nestedScrollConnection) else Modifier)
             .then(if (hasDock) Modifier else Modifier.navigationBarsPadding())
             .background(MaterialTheme.colorScheme.background)
     ) {
     Column(Modifier.fillMaxSize()
         .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))) {
-        AppTopBar("版块") {
+        AppTopBar("版块目录") {
             IconButton(onClick = { nav.navigate(Routes.searchRoute(null)) }) {
                 Icon(Icons.Filled.Search, contentDescription = "全站搜索")
             }
@@ -164,13 +168,14 @@ fun BoardScreen(
                     listState,
                     viewModel::reorderFavoriteBoards,
                     onOpenBoard,
-                    onSearch = { nav.navigate(Routes.searchRoute(null)) },
                     showBottomBar = hasDock
                 )
             }
         }
     }
-    if (hasDock) Box(Modifier.align(Alignment.BottomCenter)) { AppBottomBar(nav, Routes.BOARDS) }
+    if (hasDock) Box(Modifier.align(Alignment.BottomCenter)) {
+        AppBottomBar(nav, Routes.BOARDS, visible = dockState.visible)
+    }
     }
     }
 }
@@ -183,7 +188,6 @@ private fun BoardList(
     listState: LazyListState,
     onFavoriteOrderChanged: (List<Board>) -> Unit,
     onOpenBoard: (Board) -> Unit,
-    onSearch: () -> Unit,
     showBottomBar: Boolean
 ) {
     val categories = groups.groupBy { it.categoryName }
@@ -209,7 +213,7 @@ private fun BoardList(
         return true
     }
     val sections = buildList {
-        var nextIndex = 2 // The introduction and search entry are stable list items.
+        var nextIndex = 0
         if (orderedFavoriteBoards.value.isNotEmpty()) {
             add(BoardDirectorySection("favorite-boards", "收藏版块", orderedFavoriteBoards.value.size, nextIndex))
             nextIndex += 1 + if ("favorite-boards" in collapsed) 0 else orderedFavoriteBoards.value.size
@@ -259,40 +263,6 @@ private fun BoardList(
         state = listState,
         contentPadding = PaddingValues(bottom = if (showBottomBar) dockClearance else 24.dp)
     ) {
-        item(key = "directory-intro", contentType = "intro") {
-            Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)
-                .padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 10.dp)) {
-                Text("版块目录", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
-                Text(
-                    "${groups.sumOf { it.children.size + if (it.parent == null) 0 else 1 }} 个版块 · 找到感兴趣的讨论",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 6.dp)
-                )
-            }
-        }
-        item(key = "directory-search", contentType = "search") {
-            Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
-            Row(
-                Modifier.fillMaxWidth()
-                    .clickable(onClick = onSearch)
-                    .heightIn(min = 52.dp)
-                    .padding(horizontal = 24.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(Icons.Filled.Search, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Text(
-                    "搜索全站主题",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f).padding(start = 12.dp)
-                )
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            }
-        }
         if (orderedFavoriteBoards.value.isNotEmpty()) {
             val favoritesKey = "favorite-boards"
             val favoritesExpanded = favoritesKey !in collapsed
@@ -490,9 +460,7 @@ private fun BoardDirectoryRail(
             .padding(horizontal = 20.dp, vertical = 24.dp)
     ) {
         Text("目录概览", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        Text("按分类浏览所有版块", style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 4.dp, bottom = 20.dp))
+        Spacer(Modifier.height(16.dp))
         sections.forEach { section ->
             val active = section.key == activeKey
             Row(

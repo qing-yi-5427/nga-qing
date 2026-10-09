@@ -58,6 +58,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -69,6 +70,7 @@ import com.qingyi5427.ngaqing.ui.Routes
 import com.qingyi5427.ngaqing.ui.chrome.AppBottomBar
 import com.qingyi5427.ngaqing.ui.chrome.AppTopBar
 import com.qingyi5427.ngaqing.ui.chrome.LocalRootNavigationRail
+import com.qingyi5427.ngaqing.ui.chrome.rememberScrollDockState
 import com.qingyi5427.ngaqing.ui.design.NgaBackdropScope
 import com.qingyi5427.ngaqing.ui.design.ngaBackdropSource
 import com.qingyi5427.ngaqing.ui.util.formatAuthorName
@@ -83,6 +85,7 @@ fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hilt
     val actionError by viewModel.actionError.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val hasDock = !LocalRootNavigationRail.current && WindowInsets.ime.getBottom(LocalDensity.current) == 0
+    val dockState = rememberScrollDockState()
     val dockClearance = 96.dp + with(LocalDensity.current) {
         WindowInsets.navigationBars.getBottom(this).toDp()
     }
@@ -90,6 +93,7 @@ fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hilt
     var pendingMove by remember { mutableStateOf<FavoriteEntity?>(null) }
     var folderInput by remember { mutableStateOf("") }
     var query by remember { mutableStateOf("") }
+    var searchOpen by remember { mutableStateOf(false) }
     var selectedFolder by remember { mutableStateOf<String?>(null) }
     var sortMenu by remember { mutableStateOf(false) }
     LaunchedEffect(syncMessage) {
@@ -124,6 +128,7 @@ fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hilt
     NgaBackdropScope {
     Box(
         Modifier.fillMaxSize()
+            .then(if (hasDock) Modifier.nestedScroll(dockState.nestedScrollConnection) else Modifier)
             .imePadding()
             .then(if (hasDock) Modifier else Modifier.navigationBarsPadding())
             .background(MaterialTheme.colorScheme.background)
@@ -131,6 +136,11 @@ fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hilt
     Column(Modifier.fillMaxSize()
         .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))) {
         AppTopBar("收藏", actions = {
+            IconButton(onClick = { searchOpen = true }) {
+                Icon(Icons.Filled.Search, contentDescription = "搜索收藏",
+                    tint = if (query.isNotBlank()) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurface)
+            }
             IconButton(onClick = viewModel::syncFromServer, enabled = !syncing) {
                 if (syncing) CircularProgressIndicator(Modifier.padding(10.dp), strokeWidth = 2.dp)
                 else Icon(Icons.Filled.Sync, contentDescription = "与 NGA 收藏同步")
@@ -153,8 +163,8 @@ fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hilt
         })
         LazyColumn(Modifier.weight(1f).ngaBackdropSource(), contentPadding = PaddingValues(bottom = if (hasDock) dockClearance else 24.dp)) {
             item(key = "favorites-tools", contentType = "tools") {
-                FavoritesTools(favorites.size, query, folders, selectedFolder,
-                    onQueryChange = { query = it; viewModel.setQuery(it) },
+                FavoritesTools(query, folders, selectedFolder,
+                    onClearQuery = { query = ""; viewModel.setQuery("") },
                     onFolderSelect = { selectedFolder = it; viewModel.setFolder(it) })
             }
             if (favorites.isEmpty()) {
@@ -187,8 +197,33 @@ fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hilt
         }
         }
     }
-    if (hasDock) Box(Modifier.align(Alignment.BottomCenter)) { AppBottomBar(nav, Routes.FAVORITES) }
+    if (hasDock) Box(Modifier.align(Alignment.BottomCenter)) {
+        AppBottomBar(nav, Routes.FAVORITES, visible = dockState.visible)
     }
+    }
+    }
+
+    if (searchOpen) {
+        AlertDialog(
+            onDismissRequest = { searchOpen = false },
+            shape = RoundedCornerShape(12.dp),
+            title = { Text("搜索收藏") },
+            text = {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it; viewModel.setQuery(it) },
+                    placeholder = { Text("输入标题或作者") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = { TextButton(onClick = { searchOpen = false }) { Text("完成") } },
+            dismissButton = { TextButton(onClick = {
+                query = ""
+                viewModel.setQuery("")
+                searchOpen = false
+            }) { Text("清除") } }
+        )
     }
 
     pendingDelete?.let { favorite ->
@@ -262,27 +297,20 @@ private fun FavoritesEmpty(filtered: Boolean) {
 
 @Composable
 private fun FavoritesTools(
-    count: Int,
     query: String,
     folders: List<String>,
     selectedFolder: String?,
-    onQueryChange: (String) -> Unit,
+    onClearQuery: () -> Unit,
     onFolderSelect: (String?) -> Unit
 ) {
     Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 4.dp)) {
         Text("稍后阅读", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Text("$count 篇主题 · 按分组整理你的收藏", style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 3.dp))
+        if (query.isNotBlank()) {
+            TextButton(onClick = onClearQuery, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text("清除搜索：$query", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
     }
-    OutlinedTextField(
-        value = query,
-        onValueChange = onQueryChange,
-        leadingIcon = { Icon(Icons.Filled.Search, null) },
-        placeholder = { Text("搜索收藏") },
-        singleLine = true,
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)
-    )
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically

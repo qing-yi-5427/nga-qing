@@ -7,10 +7,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeUp
@@ -55,6 +58,7 @@ class HeaderScrollRenderTest {
         }
 
         val firstTitle = "主题 1：地图路线"
+        val initialTopBar = compose.onNodeWithTag("thread-top-bar").getUnclippedBoundsInRoot()
         val initialHeader = compose.onNodeWithTag("thread-header").getUnclippedBoundsInRoot()
         val initialRow = compose.onNodeWithText(firstTitle).assertIsDisplayed().getUnclippedBoundsInRoot()
         compose.runOnUiThread { saveNativeScreenshot(compose.activity, "thread-header-start-390.png") }
@@ -65,7 +69,10 @@ class HeaderScrollRenderTest {
             up()
         }
         val middleHeader = compose.onNodeWithTag("thread-header").getUnclippedBoundsInRoot()
+        val middleTopBar = compose.onNodeWithTag("thread-top-bar").getUnclippedBoundsInRoot()
         val middleRow = compose.onNodeWithText(firstTitle).assertIsDisplayed().getUnclippedBoundsInRoot()
+        check(abs((initialTopBar.top - middleTopBar.top).value) <= 1f)
+        check(abs((initialTopBar.bottom - middleTopBar.bottom).value) <= 1f)
         val headerTravel = (initialHeader.top - middleHeader.top).value
         val rowTravel = (initialRow.top - middleRow.top).value
         check(progress.value in 0.05f..0.9f) { "The slow drag should leave a partially hidden header" }
@@ -89,9 +96,17 @@ class HeaderScrollRenderTest {
 
         compose.onNodeWithTag("thread-list-viewport").performTouchInput { swipeUp() }
         check(progress.value > 0.9f) { "A long upward gesture should move the header fully out" }
+        val hiddenTopBar = compose.onNodeWithTag("thread-top-bar").getUnclippedBoundsInRoot()
+        check(abs((initialTopBar.top - hiddenTopBar.top).value) <= 1f)
+        check(abs((initialTopBar.bottom - hiddenTopBar.bottom).value) <= 1f)
         compose.runOnUiThread { saveNativeScreenshot(compose.activity, "thread-header-hidden-390.png") }
         compose.onNodeWithTag("thread-list-viewport").performTouchInput { swipeDown() }
         check(progress.value < 0.9f) { "A downward gesture should reveal the header" }
+        check(abs((initialTopBar.top - compose.onNodeWithTag("thread-top-bar").getUnclippedBoundsInRoot().top).value) <= 1f)
+        compose.onNode(hasText("探索交流") and hasClickAction()).performClick()
+        check(progress.value == 0f) { "Tapping the fixed title should restore the tools" }
+        check(abs((initialHeader.top - compose.onNodeWithTag("thread-header").getUnclippedBoundsInRoot().top).value) <= 1f)
+        compose.onNodeWithText("全部主题").assertIsDisplayed()
     }
 
     @Test
@@ -114,6 +129,7 @@ class HeaderScrollRenderTest {
         }
         compose.onNodeWithTag("thread-header").performTouchInput { swipeUp() }
         check(progress.value > 0f)
+        compose.onNode(hasText("探索交流") and hasClickAction()).assertIsDisplayed()
         compose.onNodeWithText("主题 1：地图路线").assertIsDisplayed()
     }
 

@@ -17,6 +17,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -34,6 +35,7 @@ import androidx.navigation.NavHostController
 import com.qingyi5427.ngaqing.data.model.Board
 import com.qingyi5427.ngaqing.data.model.BoardGroup
 import com.qingyi5427.ngaqing.data.model.ThreadItem
+import com.qingyi5427.ngaqing.data.local.AccountDisplay
 import com.qingyi5427.ngaqing.ui.RootPane
 import com.qingyi5427.ngaqing.ui.ReadingPane
 import com.qingyi5427.ngaqing.ui.railAdjustedPaneLayout
@@ -45,6 +47,7 @@ import com.qingyi5427.ngaqing.ui.board.BoardViewModel
 import com.qingyi5427.ngaqing.ui.design.saveNativeScreenshot
 import com.qingyi5427.ngaqing.ui.profile.ProfileScreen
 import com.qingyi5427.ngaqing.ui.root.RootViewModel
+import com.qingyi5427.ngaqing.ui.root.ProfileLoadState
 import com.qingyi5427.ngaqing.ui.thread.ThreadListScreen
 import com.qingyi5427.ngaqing.ui.thread.ThreadListViewModel
 import com.qingyi5427.ngaqing.ui.thread.ThreadSort
@@ -96,6 +99,7 @@ class RootPaneRenderTest {
         every { vm.initialScrollIndex } returns 0
         every { vm.initialScrollOffset } returns 0
         renderShell(1200f, 800f, 1f, Routes.BOARDS) { nav -> BoardScreen(nav, vm) }
+        compose.onAllNodesWithText("版块目录").assertCountEquals(1)
         compose.onNodeWithText("目录概览").assertIsDisplayed()
         compose.onNodeWithText("技术讨论").assertIsDisplayed()
         compose.runOnUiThread { saveNativeScreenshot(compose.activity, "root-board-1200x800-light.png") }
@@ -236,6 +240,9 @@ class RootPaneRenderTest {
         val root = mockk<RootViewModel>(relaxed = true)
         every { root.userName } returns MutableStateFlow("一位阅读论坛的用户")
         every { root.userId } returns MutableStateFlow("123456")
+        every { root.accountDisplay } returns MutableStateFlow(
+            AccountDisplay("123456", "一位阅读论坛的用户", "", 1L))
+        every { root.profileLoad } returns MutableStateFlow(ProfileLoadState())
         renderShell(width, height, fontScale, Routes.PROFILE, railInsets) { nav -> ProfileScreen(nav, root = root) }
     }
 

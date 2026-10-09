@@ -68,3 +68,17 @@ Robolectric Native 的生产 LoginScreen 测试检查 320×420 dp / 1.4 倍字�
 同轮把主题列表顶栏保存为连续隐藏比例，使上滑、下滑及顶栏自身拖动都能跟随手势，不再在阈值处突然切换；点击主题继续保留该版块顶栏状态。生产 Screen 的[初始](docs/ui-evidence/glass-thread-header-start-390.png)、[中间](docs/ui-evidence/glass-thread-header-middle-390.png)、[隐藏](docs/ui-evidence/glass-thread-header-hidden-390.png)及[重建恢复](docs/ui-evidence/glass-thread-header-restored-390.png)帧、反向手势和短窗/大字断言均通过。导航动效修正了返回时上层页面遮住下层内容导致的硬切：窄屏 push/pop 各有短距离与透明度过渡，根标签以淡变切换，宽屏共享列表与侧轨保持稳定。中间帧[进入](docs/ui-evidence/glass-motion-child-push-mid.png)、[返回](docs/ui-evidence/glass-motion-child-pop-mid.png)、[宽屏](docs/ui-evidence/glass-motion-wide-shared-mid.png)使用**真实 NavHost 转场与纯色测试夹具**验证像素，不是 NGA 实际页面截图。帖子页码及认证逻辑未改。
 
 本版最新检查结果：`:app:testDebugUnitTest` **140 项、0 失败/错误/跳过**；单工作器完整重分析 `:app:lintDebug` **0 error、34 warning**；`:app:assembleRelease` 成功。APK v2 签名验证通过，包名 `com.qingyi5427.ngaqing`、版本 1.1.0（code 3），最新 Release [nga-qing-release.apk](app/build/outputs/apk/release/nga-qing-release.apk) SHA-256 为 **`1EB946D5E2FC6EC3704FD5F50338F2135CAD71FF6019C16AD894EB0873C7FED4`**；此哈希取代上文所有较早构建的哈希。用户已拿走手机，本版**未安装、未做真机横屏验收**，没有改设备设置、输入凭证或发送帖子。
+
+## 滚动浮岛与个人资料（1.1.1，2026-09-28）
+
+版块、收藏、个人中心的窄屏底部浮岛以及原生帖子右下操作岛现在跟随**用户手势方向**：上滑收起、下滑重新显示。公共状态只处理用户输入的垂直拖动，累积 16 dp 后切换；短列表和列表边界的未消费拖动也能控制浮岛，程序恢复位置与布局重算不会误触发。隐藏后控件退出命中区域，滚动末尾仍留有触达余量；宽屏侧轨不参与这项显隐。网页版错误回退本身没有原生帖子操作岛，原分支保持不变。生产页面测试覆盖 Board 长列表、Favorites 短列表、Profile 与 Post 的隐藏、恢复和隐藏位置不误点导航。
+
+版块页只保留顶栏搜索，收藏/历史搜索改为顶栏入口并保留清除筛选操作；搜索页标题明确全站或版内范围，其他装饰性重复文案收起。个人中心对已登录账号按会话抓取公开昵称与头像，旧账号资料空白时可刷新，失败保留已存显示资料且提供重试；账号 revision 变化后旧结果不能写回。头像测试用应用内公开 PNG fixture 经 Coil 资源 URI 真正解码，并检查生产画面的图像像素：[个人中心头像](docs/ui-evidence/profile-local-avatar-1.1.1.png)。该图不含真实账号或论坛凭据，也不代表已对真机远端头像作验收。
+
+本轮功能基线的完整 `:app:testDebugUnitTest` 为 **156 项、0 失败/错误/跳过**；单工作器完整重分析 `:app:lintDebug` 为 **0 error、34 warning**。随后阅读页顶栏把固定“帖子”改为当前主题标题，复用现有 HTML 实体清理与单行省略，正文标题不变；相关生产阅读页定向测试 **8/8** 通过，Debug 编译及 Release 重新构建成功。`git diff --check` 无空白错误。最新 Release 包名 `com.qingyi5427.ngaqing`，版本仍为 **1.1.1（versionCode 4）**；[版本标识 APK](app/build/outputs/apk/release/nga-qing-1.1.1.apk) 与 [标准输出 APK](app/build/outputs/apk/release/nga-qing-release.apk) SHA-256 均为 **`97AF1D11B855A093CF2714719DC55397E007625766E8D461DED10C54532F1598`**。`apksigner verify` 确认 APK v2 签名，沿用项目现有 Android Debug 证书。用户已拿走手机，本版未安装、未做真机手势或头像网络验收；未执行 ADB、Git 提交或推送。
+
+主题列表顶栏现显示当前版块名，正文中重复的大版块名已移除；[生产页面截图](docs/ui-evidence/thread-board-title-1.1.1.png) 展示“寂寞的车”示例。相关渲染测试 **10/10** 通过，Release 构建成功。1.1.1（code 4）两个 APK 的最新 SHA-256 均为 **`FDEA22BD23C42EFE05F08812E23C8DCC646DCB2C1A7C7A451C915485F8B2EE75`**，取代上文旧哈希；APK v2 签名验证通过。
+
+进一步将显示版块名的顶栏固定；[工具栏隐藏时的生产截图](docs/ui-evidence/thread-fixed-title-hidden-1.1.1.png) 可见顶栏仍在原位。筛选和排序工具行继续随手势连续收放，点顶栏标题可恢复工具行并返回列表顶部；定向测试 **13/13** 通过，含短窗 2 倍字体。最新 1.1.1（code 4）两个 APK 的 SHA-256 均为 **`63DF0EFDA62137FFAACABFB387E29E769B68B8453BF9010C2E36798931C3A28F`**，取代上文旧哈希；APK v2 签名验证通过。
+
+版块页将正文“版块目录”移入顶栏并删去重复的首个列表项，分类跳转索引相应校正；[手机](docs/ui-evidence/board-title-1.1.1-phone.png)及[宽屏](docs/ui-evidence/board-title-1.1.1-wide.png)生产页面截图已核对。相关定向测试 **7/7** 通过。最新 1.1.1（code 4）两个 APK 的 SHA-256 均为 **`43DDCB20C79E4CB92304667DF9627ED13391682FECA30CF0E182149B22686F1D`**，取代上文旧哈希；APK v2 签名验证通过。切换模型所需状态见 [HANDOFF.md](HANDOFF.md)。

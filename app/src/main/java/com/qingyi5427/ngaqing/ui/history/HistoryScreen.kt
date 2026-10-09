@@ -30,7 +30,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -50,7 +49,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -66,7 +64,6 @@ import com.qingyi5427.ngaqing.data.local.HistoryEntity
 import com.qingyi5427.ngaqing.ui.Routes
 import com.qingyi5427.ngaqing.ui.chrome.AppTopBar
 import com.qingyi5427.ngaqing.ui.design.NgaStatePanel
-import com.qingyi5427.ngaqing.ui.design.NgaGlassSurface
 import com.qingyi5427.ngaqing.ui.gesture.SwipeBackContainer
 import com.qingyi5427.ngaqing.ui.util.formatRelative
 import com.qingyi5427.ngaqing.ui.util.formatAuthorName
@@ -77,6 +74,7 @@ fun HistoryScreen(nav: NavHostController, viewModel: HistoryViewModel = hiltView
     val history by viewModel.history.collectAsStateWithLifecycle()
     var confirmClear by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
+    var searchOpen by remember { mutableStateOf(false) }
     var sortMenu by remember { mutableStateOf(false) }
     var selectedSort by remember { mutableStateOf(HistorySort.RECENT) }
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -98,6 +96,11 @@ fun HistoryScreen(nav: NavHostController, viewModel: HistoryViewModel = hiltView
                     }
                 },
                 actions = {
+                    IconButton(onClick = { searchOpen = true }) {
+                        Icon(Icons.Filled.Search, contentDescription = "搜索浏览历史",
+                            tint = if (query.isNotBlank()) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface)
+                    }
                     if (history.isNotEmpty()) {
                         IconButton(onClick = { confirmClear = true }) {
                             Icon(Icons.Filled.DeleteSweep, contentDescription = "清空历史")
@@ -126,39 +129,13 @@ fun HistoryScreen(nav: NavHostController, viewModel: HistoryViewModel = hiltView
             if (!compactHeight) {
                 Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 4.dp)) {
                     Text("阅读轨迹", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    Text(
-                        "${history.size} 篇记录 · 继续上次的阅读位置",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 3.dp)
-                    )
                 }
-            } else {
-                Text("${history.size} 篇记录", style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 20.dp, top = 4.dp))
             }
-            NgaGlassSurface(Modifier.fillMaxWidth().padding(horizontal = 16.dp,
-                vertical = if (compactHeight) 4.dp else 10.dp)) {
-            OutlinedTextField(
-                value = query,
-                onValueChange = {
-                    query = it
-                    viewModel.setQuery(it)
-                },
-                leadingIcon = { Icon(Icons.Filled.Search, null) },
-                placeholder = { Text("搜索浏览历史") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { keyboardController?.hide() }),
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = Color.Transparent,
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent),
-                modifier = Modifier.fillMaxWidth()
-            )
+            if (query.isNotBlank()) {
+                TextButton(onClick = { query = ""; viewModel.setQuery("") },
+                    modifier = Modifier.heightIn(min = 48.dp).padding(horizontal = 12.dp)) {
+                    Text("清除搜索：$query", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant,
                 modifier = Modifier.padding(top = 4.dp))
@@ -224,6 +201,34 @@ fun HistoryScreen(nav: NavHostController, viewModel: HistoryViewModel = hiltView
                 }
             }
         }
+    }
+
+    if (searchOpen) {
+        AlertDialog(
+            onDismissRequest = { searchOpen = false },
+            shape = RoundedCornerShape(12.dp),
+            title = { Text("搜索浏览历史") },
+            text = {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it; viewModel.setQuery(it) },
+                    placeholder = { Text("输入标题或作者") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = {
+                        searchOpen = false
+                        keyboardController?.hide()
+                    }),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = { TextButton(onClick = { searchOpen = false }) { Text("完成") } },
+            dismissButton = { TextButton(onClick = {
+                query = ""
+                viewModel.setQuery("")
+                searchOpen = false
+            }) { Text("清除") } }
+        )
     }
 
     if (confirmClear) {

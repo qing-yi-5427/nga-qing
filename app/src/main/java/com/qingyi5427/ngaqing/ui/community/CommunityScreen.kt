@@ -80,9 +80,6 @@ fun CommunityScreen(nav: NavHostController, viewModel: CommunityViewModel = hilt
                     .padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 12.dp)) {
                     Text("社区动态", style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.SemiBold)
-                    Text("提醒、私信与关注主题", style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 4.dp))
                 }
             }
             Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {

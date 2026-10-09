@@ -15,18 +15,22 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
@@ -180,14 +184,15 @@ class PrimaryScreensRenderTest {
         every { vm.initialScrollOffset } returns 0
         every { vm.fid } returns "10"
         every { vm.stid } returns null
-        every { vm.name } returns "测试版块"
+        every { vm.name } returns "寂寞的车"
         every { root.blacklistUsers } returns MutableStateFlow(emptySet())
         every { root.blacklistKeywords } returns MutableStateFlow(emptySet())
         render { nav -> ThreadListScreen(nav, vm, root, selectedTid = "101") }
         compose.runOnUiThread {
             saveNativeScreenshot(compose.activity, "primary-thread-320-light-normal.png")
         }
-        compose.onNodeWithText("测试版块").assertIsDisplayed()
+        compose.onNode(hasText("寂寞的车") and hasClickAction()).assertIsDisplayed()
+        compose.onAllNodesWithText("寂寞的车").assertCountEquals(1)
         val threadTitle = compose.onNodeWithText("这是一篇需要换行的主题标题")
             .assertIsDisplayed().getUnclippedBoundsInRoot()
         check(threadTitle.right - threadTitle.left > 80.dp) {
@@ -329,6 +334,7 @@ class PrimaryScreensRenderTest {
         every { vm.replySucceeded } returns MutableStateFlow(false)
         every { vm.favoriteError } returns MutableStateFlow<String?>(null)
         render { nav -> PostScreen(nav, vm, dark = false) }
+        compose.onNode(hasText("一篇正常阅读的主题") and hasClickAction()).assertIsDisplayed()
         compose.onNodeWithText(post.content).assertIsDisplayed()
         val authorAction = compose.onNodeWithContentDescription("只看楼主")
             .assertIsDisplayed().getUnclippedBoundsInRoot()
@@ -440,20 +446,55 @@ class PrimaryScreensRenderTest {
         compose.onNodeWithContentDescription("只看楼主").assertIsDisplayed()
         compose.onNodeWithContentDescription("翻页，当前第 1 页，共 1 页").assertIsDisplayed()
         compose.onNodeWithText("回复").assertIsDisplayed()
+        val shownDockTop = compose.onNodeWithTag("post-quick-actions").getUnclippedBoundsInRoot().top
         compose.runOnUiThread {
             saveNativeScreenshot(compose.activity, "primary-post-320x320-dark-2x.png")
         }
         compose.onNodeWithTag("post-reading-list").performScrollToIndex(1)
         compose.onNodeWithTag("post-reading-list").performTouchInput { swipeUp() }
         val lastLine = compose.onNodeWithText(reply.content).assertIsDisplayed().getUnclippedBoundsInRoot()
-        val floatingAction = compose.onNodeWithContentDescription("只看楼主")
-            .assertIsDisplayed().getUnclippedBoundsInRoot()
-        check(lastLine.bottom <= floatingAction.top) {
-            "Last floor must scroll fully above floating actions in a short window"
+        compose.onNodeWithTag("post-quick-actions").assertDoesNotExist()
+        check(lastLine.bottom <= shownDockTop) { "The last floor needs space for the dock when it returns" }
+        compose.onNodeWithTag("post-reading-list").performTouchInput { swipeDown() }
+        compose.onNodeWithTag("post-quick-actions").assertIsDisplayed()
+        // Returning the dock while dragging down naturally moves the floor lower. At the end
+        // of the list it must still be possible to position that floor above the restored dock.
+        compose.onNodeWithTag("post-reading-list").performScrollToIndex(2)
+        val restoredLastLine = compose.onNodeWithText(reply.content).assertIsDisplayed().getUnclippedBoundsInRoot()
+        val restoredDockTop = compose.onNodeWithTag("post-quick-actions").getUnclippedBoundsInRoot().top
+        check(restoredLastLine.bottom <= restoredDockTop) {
+            "Last floor must remain reachable above the restored floating actions"
         }
         compose.runOnUiThread {
             saveNativeScreenshot(compose.activity, "primary-post-320x320-dark-2x-end.png")
         }
+    }
+
+    @Test fun webFallbackErrorHasNoNativeReadingDock() {
+        val vm = mockk<PostViewModel>(relaxed = true)
+        every { vm.uiState } returns MutableStateFlow<PostUiState>(PostUiState.Error("bad-json", "解析失败"))
+        every { vm.subject } returns MutableStateFlow("帖子")
+        every { vm.isFavorite } returns MutableStateFlow(false)
+        every { vm.isLoadingMore } returns MutableStateFlow(false)
+        every { vm.loadError } returns MutableStateFlow<String?>(null)
+        every { vm.isRefreshing } returns MutableStateFlow(false)
+        every { vm.targetFloor } returns MutableStateFlow<Int?>(null)
+        every { vm.totalRows } returns MutableStateFlow(0)
+        every { vm.onlyAuthor } returns MutableStateFlow(false)
+        every { vm.replyTarget } returns MutableStateFlow(null)
+        every { vm.draftContent } returns MutableStateFlow("")
+        every { vm.watching } returns MutableStateFlow(false)
+        every { vm.ngaDomain } returns MutableStateFlow("bbs.nga.cn")
+        every { vm.webCookiesReady } returns MutableStateFlow(false)
+        every { vm.replying } returns MutableStateFlow(false)
+        every { vm.replyResult } returns MutableStateFlow<String?>(null)
+        every { vm.replySucceeded } returns MutableStateFlow(false)
+        every { vm.favoriteError } returns MutableStateFlow<String?>(null)
+
+        render { nav -> PostScreen(nav, vm, dark = false) }
+        compose.onNodeWithTag("post-quick-actions").assertDoesNotExist()
+        compose.onNodeWithText("用网页版打开").performClick()
+        compose.onNodeWithTag("post-quick-actions").assertDoesNotExist()
     }
 
     private fun render(

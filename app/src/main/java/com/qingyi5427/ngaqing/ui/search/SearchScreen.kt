@@ -45,7 +45,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -85,31 +84,13 @@ fun SearchScreen(
                 .background(MaterialTheme.colorScheme.background)
         ) {
         AppTopBar(
-            title = "搜索",
+            title = if (fid.isNullOrBlank() && stid.isNullOrBlank()) "全站搜索" else "版内搜索",
             navigationIcon = {
                 IconButton(onClick = { nav.popBackStack() }) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                 }
             }
         )
-        if (!compactHeight) {
-            Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 4.dp)) {
-                Text("搜索讨论", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Text(
-                    if (fid.isNullOrBlank() && stid.isNullOrBlank()) "范围 · 全站主题" else "范围 · 当前版块",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(top = 3.dp)
-                )
-            }
-        } else {
-            Text(
-                if (fid.isNullOrBlank() && stid.isNullOrBlank()) "全站主题" else "当前版块",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(start = 20.dp, top = 4.dp)
-            )
-        }
         NgaGlassSurface(Modifier.fillMaxWidth().padding(horizontal = 16.dp,
             vertical = if (compactHeight) 4.dp else 12.dp)) {
         OutlinedTextField(
