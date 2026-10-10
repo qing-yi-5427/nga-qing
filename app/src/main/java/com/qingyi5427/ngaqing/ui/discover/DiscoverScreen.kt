@@ -115,7 +115,7 @@ fun DiscoverScreen(nav: NavHostController, viewModel: DiscoverViewModel = hiltVi
                         CircularProgressIndicator()
                     }
                     is DiscoverState.Error -> NgaStatePanel(
-                        "发现页加载失败", current.message, "重试", viewModel::refresh
+                        "发现页加载失败", discoverErrorText(current.message), "重试", viewModel::refresh
                     )
                     is DiscoverState.Ready -> BoxWithConstraints(Modifier.fillMaxSize()) {
                         val wide = policy.homeTwoRegions && maxWidth >= 680.dp
@@ -147,7 +147,7 @@ fun DiscoverScreen(nav: NavHostController, viewModel: DiscoverViewModel = hiltVi
                                                 modifier = Modifier.clickable(onClick = viewModel::refresh).padding(bottom = 8.dp))
                                         }
                                         if (current.discussions.isEmpty()) {
-                                            item { InlineState(current.discussionError ?: "暂无讨论", viewModel::refresh) }
+                                            item { InlineState(discoverErrorText(current.discussionError ?: "暂无讨论"), viewModel::refresh) }
                                         } else item {
                                             DiscussionGroup(current.discussions.take(16), policy.mediumComfortTypography,
                                                 onDiscussion)
@@ -162,7 +162,9 @@ fun DiscoverScreen(nav: NavHostController, viewModel: DiscoverViewModel = hiltVi
                                             favoriteBased = favorites.isNotEmpty(), fourColumns = false,
                                             onOpen = { board -> nav.navigate(Routes.threadRoute(board.fid, board.name, board.stid)) },
                                             onAll = { nav.navigate(Routes.BOARDS) }) }
-                                        if (current.boardError != null) item { InlineState(current.boardError, viewModel::refresh) }
+                                        if (current.boardError != null) item {
+                                            InlineState(discoverErrorText(current.boardError), viewModel::refresh)
+                                        }
                                     }
                                 }
                             }
@@ -181,7 +183,9 @@ fun DiscoverScreen(nav: NavHostController, viewModel: DiscoverViewModel = hiltVi
                                         LocalDensity.current.fontScale < 1.3f,
                                     onOpen = { board -> nav.navigate(Routes.threadRoute(board.fid, board.name, board.stid)) },
                                     onAll = { nav.navigate(Routes.BOARDS) }) }
-                                if (current.boardError != null) item { InlineState(current.boardError, viewModel::refresh) }
+                                if (current.boardError != null) item {
+                                    InlineState(discoverErrorText(current.boardError), viewModel::refresh)
+                                }
                                 item { SectionHeading("正在讨论", "查看全部") {
                                     current.discussionBoard?.let { board ->
                                         nav.navigate(Routes.threadRoute(board.fid, board.name, board.stid))
@@ -193,7 +197,7 @@ fun DiscoverScreen(nav: NavHostController, viewModel: DiscoverViewModel = hiltVi
                                         modifier = Modifier.clickable(onClick = viewModel::refresh).padding(bottom = 8.dp))
                                 }
                                 if (current.discussions.isEmpty()) {
-                                    item { InlineState(current.discussionError ?: "暂无讨论", viewModel::refresh) }
+                                    item { InlineState(discoverErrorText(current.discussionError ?: "暂无讨论"), viewModel::refresh) }
                                 } else item {
                                     DiscussionGroup(current.discussions.take(16), policy.mediumComfortTypography,
                                         onDiscussion)
@@ -460,4 +464,12 @@ private fun InlineState(message: String, retry: (() -> Unit)? = null) {
                 modifier = Modifier.clickable(onClick = retry).padding(top = 10.dp))
         }
     }
+}
+
+/** Keep transport diagnostics out of the public home page while retaining retry. */
+internal fun discoverErrorText(message: String): String {
+    val networkFailure = listOf("unable to resolve host", "unknownhostexception",
+        "failed to connect", "sockettimeoutexception", "timeout")
+        .any { message.contains(it, ignoreCase = true) }
+    return if (networkFailure) "当前无法连接 NGA，请检查网络后重试" else message
 }

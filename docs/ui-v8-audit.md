@@ -12,7 +12,7 @@
 | 关注点 | 真实文件 | V8 动作 |
 | --- | --- | --- |
 | Activity 与路由 | `ui/NgaNavHost.kt`、`ui/Routes.kt`、`ui/NavigationMotion.kt` | 保留同一 NavController 与认证 revision 隔离；加入发现根入口和阅读双栏容器。 |
-| 根导航和顶栏 | `ui/chrome/BottomNav.kt` | 四 Tab，宽屏侧轨只用于根页面；阅读路由按需目录浮层。 |
+| 根导航和顶栏 | `ui/chrome/BottomNav.kt`、`ui/chrome/EditorialChrome.kt` | 四 Tab；宽屏根页面使用顶部导航，紧凑窗口使用底部导航；阅读路由按需目录浮层，无常驻侧轨。 |
 | 窗口与折痕 | `ui/adaptive/PaneLayout.kt`、`ui/NgaNavHost.kt` | 先计算折痕安全区和 safeDrawing 可用尺寸，再输出统一 V8 策略。 |
 | 颜色与字体 | `ui/theme/Theme.kt`、`ui/theme/Type.kt` | V8 浅深色和按内容角色的字号；现有阅读偏好继续生效。 |
 | 发现 | `ui/discover/DiscoverScreen.kt`、`ui/discover/DiscoverViewModel.kt` | 使用现有 `NgaRepository` 的真实目录、主题、历史和收藏版块；具备加载、空、错误和离线缓存状态。 |
@@ -28,5 +28,7 @@ HTML 与 PNG 仅是视觉参考。截图证据需要来自实际 Compose 页面�
 ## V8 Debug 候选检查（2026-10-10）
 
 - 正式生产布局容器 `ThreadRouteContent` 输出 986×698 左主题列表与右空态；`PostRouteContent` 输出同窗左列表加右 `PostScreen`，并在测试中验证专注隐藏与双栏恢复。对应原生 Compose 图在 `app/build/outputs/ui-evidence/`，文件名分别为 `v8-thread-html-innerL-986x698.png`、`v8-posts-html-innerL-986x698.png`。发现宽窗图是 `v8-discover-innerL-html-size.png`。三者均为 Robolectric 测试样本，不代表设备网络数据。
-- RootPane/发现/收藏/版块/Reader 状态等定向回归通过。完整 `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug` 通过：45 suite、191 test、0 failed/error/skipped；Lint 0 error / 35 warning。与原工作树的 34 warning 比较，新增项只提示测试 runner 依赖有较新版本。
-- Debug APK `com.qingyi5427.ngaqing`、1.2.0/code5；证书与设备原装 Debug APK 相同，SHA-256 `A63A6DEC3974743479EA7E2EEEC601FE3C1A1911FF674937636C197C88029588`。QA 已按保留数据方式安装候选，独立 AndroidTest 与完整设备矩阵仍在执行。正式 Release 尚未构建。
+- 前一候选完整检查为 45 suite、191 test、0 failed/error/skipped；Lint 0 error / 35 warning；Debug SHA-256 `A63A6DEC3974743479EA7E2EEEC601FE3C1A1911FF674937636C197C88029588`。QA 保数据安装后重复实测发现 #5 楼续读间歇丢失，因此这些数值和设备结果仅代表前一候选。
+- 当前候选纳入 `a589594` 的续读持久化修复、发现页离线中文提示及六预设模拟。完整 `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest` 成功：48 suite、205 test、0 failed/error/skipped；Lint 0 error / 35 warning。35 个 warning 中相对旧基线新增的一项只提示测试 runner 依赖可升级。JUnit XML 位于 `app/build/test-results/testDebugUnitTest/`，Lint XML 位于 `app/build/reports/lint-results-debug.xml`。
+- 当前 Debug APK `com.qingyi5427.ngaqing`、1.2.0/code5，SHA-256 `80B64AC1E9E45DB62B03829F4D75F7960C322E97A864D1BAA195A077B4D59A7F`；测试 APK SHA-256 `22714231484B996B34E8EB8BB0846129A9AB8B3A9C40CBCF8C053D5E415F869F`。两包证书 SHA-256 `3774e86da5188b94341d667ad7e4a871ad8cda74f81088fb8445654d6068e0d6`。QA 正复验当前包，结果以 `docs/ui-v8-qa/validation.md` 为准；正式 Release 尚未构建。
+- 六预设的本地 Compose 模拟索引、实际 dp 和密度假定见 `docs/ui-v8-window-presets.md`。系统拒绝实体设备的 `wm size/density` 覆盖；不得把模拟图称为物理折叠屏实测。

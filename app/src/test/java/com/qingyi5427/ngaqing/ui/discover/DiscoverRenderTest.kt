@@ -125,6 +125,25 @@ class DiscoverRenderTest {
         compose.onNodeWithText("数码硬件").assertIsDisplayed()
     }
 
+    @Test
+    fun offlineHomeShowsChineseExplanationAndRetry() {
+        val vm = mockk<DiscoverViewModel>(relaxed = true)
+        every { vm.state } returns MutableStateFlow<DiscoverState>(DiscoverState.Error(
+            "Unable to resolve host \"nga.178.com\""))
+        every { vm.favoriteBoards } returns MutableStateFlow(emptyList())
+        every { vm.history } returns MutableStateFlow(emptyList())
+        compose.setContent {
+            NgaQingTheme {
+                val nav = rememberNavController()
+                RootPane(calculatePaneLayout(394f, 854f, null), nav, Routes.DISCOVER) {
+                    DiscoverScreen(nav, vm)
+                }
+            }
+        }
+        compose.onNodeWithText("当前无法连接 NGA，请检查网络后重试").assertIsDisplayed()
+        compose.onNodeWithText("重试").assertIsDisplayed()
+    }
+
     private fun render(width: Float, height: Float, filename: String,
         fold: FoldGeometry? = null): V8LayoutPolicy {
         var applied: V8LayoutPolicy? = null
