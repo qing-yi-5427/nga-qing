@@ -145,13 +145,13 @@ internal fun ReaderDock(
                         tint = if (onlyAuthor) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(20.dp))
                 }
-                Spacer(Modifier.width(3.dp))
                 if (compact) {
                     IconButton(onClick = interacted(onReply), modifier = Modifier.size(48.dp)) {
                         Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = "回复", Modifier.size(20.dp),
                             tint = MaterialTheme.colorScheme.primary)
                     }
                 } else {
+                    Spacer(Modifier.width(3.dp))
                     Surface(
                         onClick = interacted(onReply),
                         modifier = Modifier.heightIn(min = 48.dp),
