@@ -2,6 +2,18 @@
 
 2026-10-10。本文件只记录本轮可复核结果。旧 `FOLDABLE_REVIEW.md` 的 92 项和 `HANDOFF.md` 的 156 项均不作为 V8 通过数。证据分为真实直板机、Robolectric 原生 Compose 测试样张、策略/状态单测和未验证的实体折叠屏；测试样张不能冒称实机。
 
+## 1.2.1 首页修复增量验收
+
+用户提供的真实内屏横屏原图 `C:\Users\qingy\AppData\Local\Temp\codex-clipboard-1144ba4b-3357-4bf3-b4bc-edb7de1afb5a.jpg` 清楚显示左右两区都绘出同一份“继续阅读 + 常逛版块”，左区“正在讨论”被画面覆盖；竖屏原图为同目录 `codex-clipboard-626a1ba1-cf2d-4150-8b0f-caaca8b6e129.jpg`。旧 Compose 布局树原本将讨论置左、续读/版块置右，旧静态测试只验证节点坐标，不能识别画面层重复。旧发现页宽屏两个 `LazyColumn` 在同一 `NgaBackdropScope` 中分别调用 `.ngaBackdropSource()`；Haze 1.0.2 同一状态共享绘制层的字节码审计及仅对发现页移除无消费者背景源的修复，见 [`../ui-v8-home-fix.md`](../ui-v8-home-fix.md)。此机制解释原图，但没有旧包实体 Fold 的可控复现记录。
+
+修复后 `DiscoverRenderTest.windowResizeKeepsDiscussionDistinctFromBoardsAndHistory` 在**同一 composition** 中反复执行 425×623→860×608→425×623→860×608。测试有真实形状的收藏、续读与讨论 fixture，逐区断言标题唯一及位置，还从 Native 软件渲染截图统计深蓝像素：宽右须有续读卡，宽左不得出现第二张续读卡。窄屏“常逛版块”先于“继续阅读”，宽屏左“正在讨论”、右“常逛版块”先于“继续阅读”；窄栏滚动后宽→窄，续读标题坐标恢复至切换前 30dp 内。新搜索入口在窄宽布局均为至少 48dp，点击两次都调用原搜索路由。三张原生测试图为 `app/build/outputs/ui-evidence/v8-resize-cover-before.png`、`v8-resize-inner-wide.png`、`v8-resize-cover-after.png`；原图和 Native 软件图来源不同，不能据此宣布实体 Fold GPU 故障已现场复测。
+
+增量定向回归先在旧滚动状态实现上得到红灯：窄栏滑动到续读后往返宽栏，回窄时跳到顶部。随后仅在发现页提升三份 `LazyListState`，原测试变绿。最终 `:app:testDebugUnitTest :app:lintDebug --no-parallel --max-workers=1` 成功：48 suites、206 tests、0 failed/error/skipped；Lint 0 error、35 warning。以下 1.2.0/code5 的实体和发布记录仍是上一包历史结果，1.2.1/code6 正式包验收另行追加。当前连接设备仍只有 `116e3768` Xiaomi `25102RKBEC`，1200×2608/480dpi 的直板机；实体折叠开合与 Haze GPU 消退须在真实 Fold 上复测。
+
+后补 `largeTextSearchIconFitsCoverMasthead` 定向测试以 425×623dp、fontScale 1.5 的 Native 软件渲染再次确认搜索按钮完整落在窗口内，触控框至少 48dp，截图 `app/build/outputs/ui-evidence/v8-search-cover-font1p5.png`。此单项测试通过；它是在上述 206 项全量执行后增补的，未把单项冒计为全量 207 项，也不等同实体系统字体设置测试。
+
+正式 1.2.1/code6 APK `G:\AI\coding\10-nga\V8_Release\nga-qing-1.2.1-v8.apk` 独立核 SHA-256 `0A66FF777C35DE2E558DB8EB88F58020156EBE0E2A5C6AD185681B922771B380`、原签名证书 `3774e86da5188b94341d667ad7e4a871ad8cda74f81088fb8445654d6068e0d6`、APK v2 签名与包名版本。`adb install -r` 在连接直板机成功，`dataDir=/data/user/0/com.qingyi5427.ngaqing` 和 2026-08-20 的首次安装时间均不变；拉回已装 `base.apk` 的 SHA-256 与交付文件相同，冷启命令报告成功（93ms）。实机当时处于安全锁屏，外部 helper 未进入首页业务断言；用户表示暂时不方便解锁、先交付安装包。因此**新版实体搜索导航、首页实际内容与第 5 楼续读均延期，不能引用 1.2.0 的烟测当作 1.2.1 通过**。详情留在工作树外 `G:\AI\coding\10-nga\V8_QA_local\release-smoke\release-1.2.1-smoke-results.txt`。仅 QA helper 已卸载，本轮设备临时 PNG 已删除，主 App 1.2.1 保留；核回实体尺寸/密度、fontScale 1.0、自动旋转与 rotation 0、夜间 `custom_schedule`、Wi-Fi 开、飞行模式关。本轮未永久修改系统设置。
+
 ## 当前结论与版本边界
 
 **正式 Release 1.2.0/code5 已保数据覆盖安装并通过实体直板机冷启、四 Tab/搜索/历史和第 5 楼即时续读烟测。** 交付 APK `G:\AI\coding\10-nga\V8_Release\nga-qing-1.2.0-v8.apk`，SHA-256 `221A7F288157340E5CD91E291D5D8B0B7789F76EA405745058470B61DE6B2C45`；从设备取回的已安装 `base.apk` 散列完全相同。独立 Java 测试容器只注入自身进程，从外部操控 Release，四 Tab/搜索/历史通过；公开帖子“跳后首个可见 #5→立即返回→卡片第 5 楼→再入首个可见 #5”两次通过。Release 原尺寸现场图留在工作树外：`G:\AI\coding\10-nga\V8_QA_local\release-home-card5.png`、`release-reader-floor5.png`，前者显示续读卡第 5 楼，后者首个可见楼层为 #5。

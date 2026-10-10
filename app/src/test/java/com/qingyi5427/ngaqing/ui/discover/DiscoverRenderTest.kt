@@ -2,14 +2,27 @@ package com.qingyi5427.ngaqing.ui.discover
 
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.navigation.compose.rememberNavController
+import androidx.core.view.drawToBitmap
 import com.qingyi5427.ngaqing.data.local.HistoryEntity
 import com.qingyi5427.ngaqing.data.model.Board
 import com.qingyi5427.ngaqing.data.model.ThreadItem
@@ -25,12 +38,14 @@ import com.qingyi5427.ngaqing.ui.design.saveNativeScreenshot
 import com.qingyi5427.ngaqing.ui.theme.NgaQingTheme
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Rule
 import org.junit.Test
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertFalse
+import android.graphics.Color
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -123,6 +138,145 @@ class DiscoverRenderTest {
         assertFalse(applied.homeTwoRegions)
         assertEquals(1, applied.favoriteColumns)
         compose.onNodeWithText("数码硬件").assertIsDisplayed()
+    }
+
+    /** Reuses one composition across a cover-to-inner-to-cover window resize. */
+    @Test
+    @Config(sdk = [33], qualifiers = "w860dp-h623dp")
+    fun windowResizeKeepsDiscussionDistinctFromBoardsAndHistory() {
+        val window = mutableStateOf(425 to 623)
+        val nav = mockk<androidx.navigation.NavHostController>(relaxed = true)
+        val vm = mockk<DiscoverViewModel>(relaxed = true)
+        every { vm.state } returns MutableStateFlow<DiscoverState>(DiscoverState.Ready(
+            boards = boards, discussionBoard = boards.first(), discussions = discussions))
+        every { vm.favoriteBoards } returns MutableStateFlow(boards.take(2))
+        every { vm.history } returns MutableStateFlow(listOf(
+            HistoryEntity("100", titles.first(), authors.first(), "1", lastFloor = 5)))
+        compose.setContent {
+            NgaQingTheme(themeMode = "light") {
+                val (width, height) = window.value
+                CompositionLocalProvider(LocalV8LayoutPolicy provides
+                    decideV8LayoutPolicy(width.toFloat(), height.toFloat(), 1f)) {
+                    Box(Modifier.size(width.dp, height.dp).testTag("resizing-home")) {
+                        RootPane(calculatePaneLayout(width.toFloat(), height.toFloat(), null),
+                            nav, Routes.DISCOVER) { DiscoverScreen(nav, vm) }
+                    }
+                }
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("常逛版块").assertIsDisplayed()
+        val narrowSearch = compose.onNodeWithContentDescription("搜索帖子、版块与用户")
+            .assertIsDisplayed().getUnclippedBoundsInRoot()
+        assertTrue("narrow search touch target must be 48dp", narrowSearch.right - narrowSearch.left >= 48.dp &&
+            narrowSearch.bottom - narrowSearch.top >= 48.dp)
+        compose.onNodeWithContentDescription("搜索帖子、版块与用户").performClick()
+        compose.runOnUiThread { saveNativeScreenshot(compose.activity, "v8-resize-cover-before.png") }
+
+        compose.runOnUiThread { window.value = 860 to 608 }
+        compose.waitForIdle()
+        val discussion = compose.onNodeWithText("正在讨论").assertIsDisplayed()
+            .getUnclippedBoundsInRoot()
+        val boardsHeading = compose.onNodeWithText("常逛版块").assertIsDisplayed()
+            .getUnclippedBoundsInRoot()
+        val reading = compose.onNodeWithText("继续阅读").assertIsDisplayed()
+            .getUnclippedBoundsInRoot()
+        assertTrue("wide discussion belongs in the left region", discussion.right < boardsHeading.left)
+        assertTrue("wide boards precede reading in the right region", boardsHeading.bottom < reading.top)
+        compose.onAllNodesWithText("正在讨论").assertCountEquals(1)
+        compose.onAllNodesWithText("常逛版块").assertCountEquals(1)
+        compose.onAllNodesWithText("继续阅读").assertCountEquals(1)
+        val wideSearch = compose.onNodeWithContentDescription("搜索帖子、版块与用户")
+            .assertIsDisplayed().getUnclippedBoundsInRoot()
+        assertTrue("wide search touch target must be 48dp", wideSearch.right - wideSearch.left >= 48.dp &&
+            wideSearch.bottom - wideSearch.top >= 48.dp)
+        compose.onNodeWithContentDescription("搜索帖子、版块与用户").performClick()
+        verify(exactly = 2) { nav.navigate(Routes.searchRoute(null)) }
+        compose.runOnUiThread { saveNativeScreenshot(compose.activity, "v8-resize-inner-wide.png") }
+        var pixels: android.graphics.Bitmap? = null
+        compose.runOnUiThread { pixels = compose.activity.window.decorView.drawToBitmap() }
+        val wideBitmap = requireNotNull(pixels)
+        val leftBlue = darkBlueFraction(wideBitmap, 0.05f, 0.54f)
+        val rightBlue = darkBlueFraction(wideBitmap, 0.61f, 0.96f)
+        assertTrue("right reading card should be visibly blue: $rightBlue", rightBlue > 0.04f)
+        assertTrue("left discussion must not paint a second reading card: left=$leftBlue right=$rightBlue",
+            leftBlue < rightBlue * 0.45f)
+
+        compose.runOnUiThread { window.value = 425 to 623 }
+        compose.waitForIdle()
+        compose.onNodeWithText("常逛版块").assertIsDisplayed()
+        compose.onNodeWithContentDescription("搜索帖子、版块与用户").assertIsDisplayed()
+        compose.runOnUiThread { saveNativeScreenshot(compose.activity, "v8-resize-cover-after.png") }
+        compose.runOnUiThread { window.value = 860 to 608 }
+        compose.waitForIdle()
+        compose.onNodeWithText("正在讨论").assertIsDisplayed()
+        compose.onAllNodesWithText("继续阅读").assertCountEquals(1)
+
+        compose.runOnUiThread { window.value = 425 to 623 }
+        compose.waitForIdle()
+        compose.onNodeWithTag("resizing-home").performTouchInput {
+            swipeUp(startY = bottom * 0.82f, endY = bottom * 0.62f)
+        }
+        compose.waitForIdle()
+        compose.runOnUiThread { saveNativeScreenshot(compose.activity, "v8-resize-cover-scrolled.png") }
+        val readingBeforeResize = compose.onNodeWithText("继续阅读").assertIsDisplayed()
+            .getUnclippedBoundsInRoot().top
+        compose.runOnUiThread { window.value = 860 to 608 }
+        compose.waitForIdle()
+        compose.runOnUiThread { window.value = 425 to 623 }
+        compose.waitForIdle()
+        val readingAfterResize = compose.onNodeWithText("继续阅读").assertIsDisplayed()
+            .getUnclippedBoundsInRoot().top
+        assertTrue("cover scroll position should survive an inner-window round trip",
+            kotlin.math.abs((readingAfterResize - readingBeforeResize).value) <= 30f)
+    }
+
+    private fun darkBlueFraction(bitmap: android.graphics.Bitmap, fromX: Float, toX: Float): Float {
+        var blue = 0
+        var total = 0
+        for (y in (bitmap.height * 0.30f).toInt() until (bitmap.height * 0.94f).toInt() step 4) {
+            for (x in (bitmap.width * fromX).toInt() until (bitmap.width * toX).toInt() step 4) {
+                val pixel = bitmap.getPixel(x, y)
+                val red = Color.red(pixel)
+                val green = Color.green(pixel)
+                val valueBlue = Color.blue(pixel)
+                if (valueBlue > red + 18 && valueBlue > green + 8 && red < 185) blue++
+                total++
+            }
+        }
+        return blue.toFloat() / total
+    }
+
+    @Test
+    @Config(sdk = [33], qualifiers = "w425dp-h623dp")
+    fun largeTextSearchIconFitsCoverMasthead() {
+        val vm = mockk<DiscoverViewModel>(relaxed = true)
+        every { vm.state } returns MutableStateFlow<DiscoverState>(DiscoverState.Ready(
+            boards = boards, discussionBoard = boards.first(), discussions = discussions))
+        every { vm.favoriteBoards } returns MutableStateFlow(boards.take(2))
+        every { vm.history } returns MutableStateFlow(listOf(
+            HistoryEntity("100", titles.first(), authors.first(), "1", lastFloor = 5)))
+        compose.setContent {
+            NgaQingTheme(themeMode = "light") {
+                CompositionLocalProvider(
+                    LocalDensity provides Density(1f, 1.5f),
+                    LocalV8LayoutPolicy provides decideV8LayoutPolicy(425f, 623f, 1.5f)
+                ) {
+                    val nav = rememberNavController()
+                    Box(Modifier.size(425.dp, 623.dp)) {
+                        RootPane(calculatePaneLayout(425f, 623f, null, 1.5f),
+                            nav, Routes.DISCOVER) { DiscoverScreen(nav, vm) }
+                    }
+                }
+            }
+        }
+        compose.waitForIdle()
+        val search = compose.onNodeWithContentDescription("搜索帖子、版块与用户")
+            .assertIsDisplayed().getUnclippedBoundsInRoot()
+        assertTrue(search.right - search.left >= 48.dp && search.bottom - search.top >= 48.dp)
+        assertTrue("large-text search target must stay inside cover", search.left >= 0.dp &&
+            search.right <= 425.dp && search.top >= 0.dp && search.bottom <= 623.dp)
+        compose.runOnUiThread { saveNativeScreenshot(compose.activity, "v8-search-cover-font1p5.png") }
     }
 
     @Test
