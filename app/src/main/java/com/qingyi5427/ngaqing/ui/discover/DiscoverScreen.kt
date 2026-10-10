@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
@@ -75,9 +76,7 @@ import com.qingyi5427.ngaqing.ui.chrome.AppTopBar
 import com.qingyi5427.ngaqing.ui.chrome.EditorialRootTopBar
 import com.qingyi5427.ngaqing.ui.chrome.LocalRootNavigationRail
 import com.qingyi5427.ngaqing.ui.chrome.rememberScrollDockState
-import com.qingyi5427.ngaqing.ui.design.NgaBackdropScope
 import com.qingyi5427.ngaqing.ui.design.NgaStatePanel
-import com.qingyi5427.ngaqing.ui.design.ngaBackdropSource
 import com.qingyi5427.ngaqing.ui.util.formatAuthorName
 import com.qingyi5427.ngaqing.ui.util.formatRelative
 import java.text.SimpleDateFormat
@@ -92,14 +91,17 @@ fun DiscoverScreen(nav: NavHostController, viewModel: DiscoverViewModel = hiltVi
     val policy = LocalV8LayoutPolicy.current
     val hasDock = !LocalRootNavigationRail.current
     val dockState = rememberScrollDockState()
+    // Each layout keeps its own position while the same destination changes width.
+    val narrowListState = rememberLazyListState()
+    val wideDiscussionListState = rememberLazyListState()
+    val wideContextListState = rememberLazyListState()
     val bottom = if (hasDock) 96.dp else 24.dp
     val pagePadding = when {
         policy.availableWidthDp >= 840f -> 34.dp
         policy.mediumComfortTypography -> 30.dp
         else -> 26.dp
     }
-    NgaBackdropScope {
-        Box(
+    Box(
             Modifier.fillMaxSize()
                 .then(if (hasDock) Modifier.nestedScroll(dockState.nestedScrollConnection) else Modifier)
                 .then(if (hasDock) Modifier else Modifier.navigationBarsPadding())
@@ -129,12 +131,12 @@ fun DiscoverScreen(nav: NavHostController, viewModel: DiscoverViewModel = hiltVi
                         if (wide) {
                             Column(Modifier.fillMaxSize()) {
                                 DiscoverMasthead(policy.mediumComfortTypography,
-                                    Modifier.padding(horizontal = pagePadding))
-                                DiscoverSearch({ nav.navigate(Routes.searchRoute(null)) },
-                                    Modifier.padding(horizontal = pagePadding))
+                                    onSearch = { nav.navigate(Routes.searchRoute(null)) },
+                                    modifier = Modifier.padding(horizontal = pagePadding))
                                 Row(Modifier.fillMaxSize().padding(horizontal = pagePadding),
                                     horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                                    LazyColumn(Modifier.weight(0.58f).fillMaxHeight().ngaBackdropSource(),
+                                    LazyColumn(Modifier.weight(0.58f).fillMaxHeight(),
+                                        state = wideDiscussionListState,
                                         contentPadding = PaddingValues(bottom = bottom)) {
                                         item { SectionHeading("正在讨论", "查看全部") {
                                             current.discussionBoard?.let { board ->
@@ -153,11 +155,9 @@ fun DiscoverScreen(nav: NavHostController, viewModel: DiscoverViewModel = hiltVi
                                                 onDiscussion)
                                         }
                                     }
-                                    LazyColumn(Modifier.weight(0.42f).fillMaxHeight().ngaBackdropSource(),
+                                    LazyColumn(Modifier.weight(0.42f).fillMaxHeight(),
+                                        state = wideContextListState,
                                         contentPadding = PaddingValues(bottom = bottom)) {
-                                        item { ContinueReading(history.firstOrNull(),
-                                            onOpen = { tid -> nav.navigate(Routes.postRoute(tid)) },
-                                            onHistory = { nav.navigate(Routes.HISTORY) }) }
                                         item { BoardSection(favorites.ifEmpty { current.boards }.take(4),
                                             favoriteBased = favorites.isNotEmpty(), fourColumns = false,
                                             onOpen = { board -> nav.navigate(Routes.threadRoute(board.fid, board.name, board.stid)) },
@@ -165,18 +165,19 @@ fun DiscoverScreen(nav: NavHostController, viewModel: DiscoverViewModel = hiltVi
                                         if (current.boardError != null) item {
                                             InlineState(discoverErrorText(current.boardError), viewModel::refresh)
                                         }
+                                        item { ContinueReading(history.firstOrNull(),
+                                            onOpen = { tid -> nav.navigate(Routes.postRoute(tid)) },
+                                            onHistory = { nav.navigate(Routes.HISTORY) }) }
                                     }
                                 }
                             }
                         } else {
-                            LazyColumn(Modifier.fillMaxSize().ngaBackdropSource(),
+                            LazyColumn(Modifier.fillMaxSize(),
+                                state = narrowListState,
                                 contentPadding = PaddingValues(start = pagePadding,
                                     end = pagePadding, bottom = bottom)) {
-                                item { DiscoverMasthead(policy.mediumComfortTypography) }
-                                item { DiscoverSearch({ nav.navigate(Routes.searchRoute(null)) }) }
-                                item { ContinueReading(history.firstOrNull(),
-                                    onOpen = { tid -> nav.navigate(Routes.postRoute(tid)) },
-                                    onHistory = { nav.navigate(Routes.HISTORY) }) }
+                                item { DiscoverMasthead(policy.mediumComfortTypography,
+                                    onSearch = { nav.navigate(Routes.searchRoute(null)) }) }
                                 item { BoardSection(favorites.ifEmpty { current.boards }.take(4),
                                     favoriteBased = favorites.isNotEmpty(),
                                     fourColumns = maxWidth >= 380.dp && maxWidth < 600.dp &&
@@ -186,6 +187,9 @@ fun DiscoverScreen(nav: NavHostController, viewModel: DiscoverViewModel = hiltVi
                                 if (current.boardError != null) item {
                                     InlineState(discoverErrorText(current.boardError), viewModel::refresh)
                                 }
+                                item { ContinueReading(history.firstOrNull(),
+                                    onOpen = { tid -> nav.navigate(Routes.postRoute(tid)) },
+                                    onHistory = { nav.navigate(Routes.HISTORY) }) }
                                 item { SectionHeading("正在讨论", "查看全部") {
                                     current.discussionBoard?.let { board ->
                                         nav.navigate(Routes.threadRoute(board.fid, board.name, board.stid))
@@ -210,12 +214,12 @@ fun DiscoverScreen(nav: NavHostController, viewModel: DiscoverViewModel = hiltVi
             if (hasDock) Box(Modifier.align(Alignment.BottomCenter)) {
                 AppBottomBar(nav, Routes.DISCOVER, visible = dockState.visible)
             }
-        }
     }
 }
 
 @Composable
-private fun DiscoverMasthead(comfortable: Boolean, modifier: Modifier = Modifier) {
+private fun DiscoverMasthead(comfortable: Boolean, onSearch: () -> Unit,
+    modifier: Modifier = Modifier) {
     val date = remember { SimpleDateFormat("M 月 d 日 · EEEE", Locale.CHINA).format(Date()) }
     Column(modifier.fillMaxWidth().padding(top = if (comfortable) 14.dp else 11.dp,
         bottom = if (comfortable) 20.dp else 18.dp)) {
@@ -228,31 +232,21 @@ private fun DiscoverMasthead(comfortable: Boolean, modifier: Modifier = Modifier
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.padding(top = 7.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(top = 7.dp)) {
             Text("发现", fontSize = if (comfortable) 40.sp else 35.sp,
                 lineHeight = if (comfortable) 46.sp else 42.sp,
                 fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onBackground)
             Text(".", fontSize = if (comfortable) 40.sp else 35.sp,
                 lineHeight = if (comfortable) 46.sp else 42.sp,
                 fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = onSearch, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.Filled.Search, contentDescription = "搜索帖子、版块与用户",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(22.dp))
+            }
         }
-    }
-}
-
-@Composable
-private fun DiscoverSearch(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Row(modifier.fillMaxWidth().heightIn(min = if (LocalV8LayoutPolicy.current.mediumComfortTypography)
-        53.dp else 48.dp)
-        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(13.dp))
-        .clickable(onClick = onClick)
-        .padding(horizontal = 15.dp), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Icon(Icons.Filled.Search, contentDescription = null,
-            tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(19.dp))
-        Text("搜索帖子、版块与用户", fontSize = if (LocalV8LayoutPolicy.current.mediumComfortTypography)
-            15.sp else 13.sp, color = MaterialTheme.colorScheme.outline,
-            modifier = Modifier.weight(1f))
-        Text("⌕", color = MaterialTheme.colorScheme.outline, fontSize = 17.sp)
     }
 }
 
