@@ -29,5 +29,5 @@
 
 ## 项目自有资源
 
-- Android 启动图标源图由项目所有者提供，派生尺寸由 `tools/generate_launcher_icons.py` 生成。
+- 旧版 Android 启动图标源图由项目所有者提供。V8 蓝白图标的矢量几何与五密度派生图由 `tools/generate_launcher_icons.py` 在本项目内生成。
 - Compose 页面、导航、数据库、网络封装、解析器和测试均在本项目中维护。
