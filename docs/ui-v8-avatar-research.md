@@ -17,12 +17,18 @@ MNGA 仓库声明无许可；这里只依据字段和协议行为重新实现少
 
 ## 本次修复
 
-`normalizeNgaAvatarUrl` 原先把 `|.a` 后的多头像内容也交给 Coil，形成无效 URL。现在仅保留第一个完整头像 URL，其他现有 URL 规范化继续执行。补齐旧 `img*.ngabbs.com` 图片域迁移，并将文字 `null` 视为无头像。对应单测覆盖多头像、旧域、普通单 URL、空值和既有转义/相对地址行为。
+`normalizeNgaAvatarUrl` 原先把 `|.a` 后的多头像内容也交给 Coil，形成无效 URL。现在仅保留第一个完整头像 URL，其他现有 URL 规范化继续执行。旧 `img*` 域按 MNGA 的路径规则归一：`/ngabbs/` 到 `img4.nga.cn`，其他路径到 `img.nga.cn`，避免保留已经不存在的 `img6` 等编号域；并将文字 `null` 视为无头像。对应单测覆盖多头像、旧域、普通单 URL、空值和既有转义/相对地址行为。
 
 现有 `AuthorAvatar` 已具备加载与占位逻辑，因此不抽新组件、不改帖子页面。匿名/无头像仍安全地落到占位，不生成 UID 地址或额外用户请求。
+
+QA 用 2026-10-10 下载的公开 [GitHub 头像图片](https://avatars.githubusercontent.com/u/1?v=4&s=64) 保存为本地 `app/src/test/resources/avatar/github-u1.jpg`，再经生产 `PostScreen.AuthorAvatar` 和 Coil 加载。`ReaderHtmlVisualRenderTest.publicPhotoFixtureIsDecodedAndVisibleInsteadOfInitial` 检查头像中心像素确为图片颜色，截图为 `app/build/outputs/ui-evidence/v8-122-avatar-loaded-public-fixture.png`；空值与错误 URL 另有回退测试。这证明本地图片解码及页面显示链路可用，不证明 NGA 图片远端请求成功。
+
+统一 `testDebugUnitTest` 完成 50 个 suite、228 项测试，0 失败/错误/跳过，包含本次新增的头像 URL 用例；`lintDebug` 为 0 error、23 warning。
 
 ## 网络验证边界
 
 本机对公开 `read.php?tid=25968165&__output=8` 试过 `bbs.nga.cn`、`ngabbs.com`、`bbs.ngacn.cc`，均得到 HTTP 403；对 `nga.cn` 得到 HTTP 404。随后按应用实际 URL 参数、`User-Agent`、`X-User-Agent` 和 `Referer` 对 `bbs.nga.cn` 再试一次，仍为 HTTP 403。全部请求均未带 Cookie 或账号信息。网页读取工具也无法打开该 API。未取得真实 `__U.avatar` 响应与对应的可下载头像图片，因此不能声称用户截图中所有占位都由 `|.a` 导致，也无法完成真实头像像素验收。测试用的 `/avatars/123/456.jpg` 是不存在的占位路径，HTTP 与 HTTPS 均返回 404，不可据此判断真实头像的协议可用性。
+
+额外尝试访问同帖普通网页 `read.php?tid=25968165`（不带 `__output`），本机仍收到 HTTP 403；浏览器入口未能连接。公开代码/网页/图片索引也没有检到一个可核验的 NGA 用户头像原始 URL。现有相对 `/avatars/...` 测试地址是合成样例，并非线上样本。
 
 仓库此前因当时观测到头像 HTTPS 返回 567，将 `img.nga.cn`/`img4.nga.cn` 的 `/avatars/` 链接转 HTTP。本轮没有真实图片样本可推翻该记录，故未改此协议规则；需要在能访问 NGA 的环境用真实公开头像 URL 分别核验 HTTP/HTTPS 和最终 Coil 图片显示。

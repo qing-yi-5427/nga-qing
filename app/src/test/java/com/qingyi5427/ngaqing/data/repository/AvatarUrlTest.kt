@@ -35,6 +35,22 @@ class AvatarUrlTest {
     }
 
     @Test
+    fun `legacy numbered image host uses current avatar host`() {
+        assertEquals(
+            "http://img.nga.cn/avatars/123/456.jpg",
+            normalizeNgaAvatarUrl("https://img9.nga.178.com/avatars/123/456.jpg")
+        )
+    }
+
+    @Test
+    fun `legacy forum resource uses img4 host`() {
+        assertEquals(
+            "https://img4.nga.cn/ngabbs/face/example.png",
+            normalizeNgaAvatarUrl("https://img6.ngabbs.com/ngabbs/face/example.png")
+        )
+    }
+
+    @Test
     fun `relative avatar receives current image host`() {
         assertEquals(
             "http://img.nga.cn/avatars/123/456.jpg?x=1&y=2",

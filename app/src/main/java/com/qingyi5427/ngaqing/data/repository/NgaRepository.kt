@@ -70,19 +70,19 @@ internal fun normalizeNgaAvatarUrl(raw: String): String {
         else -> "https://img.nga.cn/${candidate.removePrefix("./")}"
     }
 
-    val migrated = absolute
-        .replace(
-            Regex("""^http://img(\d*)\.(nga\.178\.com|ngacn\.cc|ngabbs\.com|nga\.cn)""", RegexOption.IGNORE_CASE),
-            "https://img\$1.nga.cn"
-        )
-        .replace(
-            Regex("""^https://img(\d*)\.(nga\.178\.com|ngacn\.cc|ngabbs\.com)""", RegexOption.IGNORE_CASE),
-            "https://img\$1.nga.cn"
-        )
+    val migrated = absolute.replace(
+        Regex("""^https?://img\d*\.(nga\.178\.com|ngacn\.cc|ngabbs\.com)(?=/)""", RegexOption.IGNORE_CASE)
+    ) { match ->
+        val path = absolute.substring(match.range.last + 1)
+        val host = if (path.startsWith("/ngabbs/", ignoreCase = true)) "img4.nga.cn" else "img.nga.cn"
+        "https://$host"
+    }.replace(
+        Regex("""^http://img\d*\.nga\.cn(?=/)""", RegexOption.IGNORE_CASE)
+    ) { match -> match.value.replaceFirst("http://", "https://", ignoreCase = true) }
 
-    // The current img/img4 NGA avatar endpoints return HTTP 567 over TLS while the
-    // identical public avatar responds with image/jpeg over HTTP. Cleartext access is
-    // restricted to these two image hosts in network_security_config.xml.
+    // An earlier project probe found TLS 567 for an NGA avatar that worked over
+    // HTTP. Keep this narrow compatibility rule until a real avatar can be
+    // checked again; cleartext is allowed only for these two hosts.
     return migrated.replace(
         Regex("""^https://(img4?\.nga\.cn)(/avatars/)""", RegexOption.IGNORE_CASE)
     ) { match -> "http://${match.groupValues[1]}${match.groupValues[2]}" }
