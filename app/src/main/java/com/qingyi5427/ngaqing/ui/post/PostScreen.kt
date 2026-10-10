@@ -324,21 +324,28 @@ private fun PostScreenContent(
         }
     }
 
-    LaunchedEffect(s, targetFloor) {
+    LaunchedEffect(s, targetFloor, webFallback.value) {
+        if (webFallback.value) return@LaunchedEffect
         val current = s as? PostUiState.Success ?: return@LaunchedEffect
         val target = targetFloor ?: return@LaunchedEffect
         val index = current.posts.indexOfFirst { it.lou >= target }.takeIf { it >= 0 } ?: 0
         listState.scrollToItem(postLazyItemIndex(index, current.fromCache))
+        // Save the floor only after the target is actually on screen; the old
+        // firstVisibleItemIndex can still point at the preceding page meanwhile.
+        current.posts.getOrNull(visiblePostIndex(listState.firstVisibleItemIndex, current.fromCache))
+            ?.let { viewModel.updateReadFloor(it.lou) }
         viewModel.consumeTargetFloor()
     }
 
-    LaunchedEffect(s, listState) {
+    LaunchedEffect(s, listState, targetFloor, webFallback.value) {
+        if (webFallback.value || targetFloor != null) return@LaunchedEffect
         val current = s as? PostUiState.Success ?: return@LaunchedEffect
-        snapshotFlow { listState.isScrollInProgress }
+        snapshotFlow { listState.firstVisibleItemIndex to listState.isScrollInProgress }
             .distinctUntilChanged()
-            .collect { scrolling ->
-                if (!scrolling) {
-                    current.posts.getOrNull(visiblePostIndex(listState.firstVisibleItemIndex, current.fromCache))
+            .collect { (index, scrolling) ->
+                // A newly requested target wins over the old idle list anchor.
+                if (!scrolling && viewModel.targetFloor.value == null) {
+                    current.posts.getOrNull(visiblePostIndex(index, current.fromCache))
                         ?.let { viewModel.updateReadFloor(it.lou) }
                 }
             }

@@ -11,3 +11,5 @@
 宽→窄→宽/专注切换使用生产 `PostRouteContent` 与 `resolvePostRouteLayout` 组合进行回归：先跳到真实 `#5` 楼，再验证左主题栏按双栏、专注和窄窗显隐；打开原生回复编辑器输入文字并将真实 Compose 选区设为 `TextRange(2,6)`，切换窗宽与专注后检查文字和选区，最后恢复双栏及楼层可见。该测试覆盖同一 Activity/Compose 树内的重布局；进程重建后的输入法选区与实体折叠角度仍需真机验证，不以 ViewModel 的 String 草稿测试替代。
 
 Robolectric Native 样图位于 `app/build/outputs/ui-evidence/`。本轮已生成与 HTML 原型同标题和前四段正文的 `v8-reader-html-phoneP-394x854.png`、`v8-reader-html-innerP-698x986.png` 首屏及对应 `-rich-` 富文本滚动截图；图示是无网络依赖的本地生成测试位图，生产只渲染真实帖子内容。另保留 320dp 窗口、系统字体 1.5 倍的独立工具条布局截图。真机折叠角度、TalkBack 与系统字体仍交独立 QA 验收。
+
+续读楼层修复（2026-10-10）：真机旧候选曾出现跳到 `#5` 后，再打开续读卡进入 `#9`；修复将历史元数据刷新改为只更新标题等字段，不再覆写 `lastFloor`，并在历史行建好后才展示可交互的正文。目标跳转完成后保存实际可见楼层；旧列表位置在目标待定位期间不写入。楼层写入按同账号/主题顺序执行，退出阅读页后仍会完成；立即重开同主题会等该笔写入结束再读取历史。账号 revision 失效时仍拒绝旧会话写入，未改 Room 表结构或版本。定向命令：`./gradlew :app:testDebugUnitTest --tests '*HistoryWriteOrderTest' --tests '*ReadingFloorPersistenceTest' --tests '*ReaderStateTransitionRenderTest' --console=plain`，8/8 通过；结果在 `app/build/test-results/testDebugUnitTest/TEST-*.xml`。真机保数据升级后的跳楼→返回→立即续读仍待 QA 用新 APK 复验，定向通过不替代该结论。

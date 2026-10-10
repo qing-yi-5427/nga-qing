@@ -65,6 +65,18 @@ interface HistoryDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(item: HistoryEntity)
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfAbsent(item: HistoryEntity)
+
+    @Query("""UPDATE history SET
+        title = CASE WHEN :title != '' THEN :title ELSE title END,
+        author = CASE WHEN :author != '' THEN :author ELSE author END,
+        fid = CASE WHEN :fid != '' THEN :fid ELSE fid END,
+        lastVisited = :visited
+        WHERE ownerUid = :ownerUid AND tid = :tid""")
+    suspend fun updateMetadata(ownerUid: String, tid: String, title: String,
+                               author: String, fid: String, visited: Long)
+
     @Query("UPDATE history SET lastFloor = :floor WHERE ownerUid = :ownerUid AND tid = :tid")
     suspend fun updateFloor(ownerUid: String, tid: String, floor: Int)
 

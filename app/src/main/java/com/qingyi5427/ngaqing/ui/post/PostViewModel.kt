@@ -23,6 +23,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -152,6 +153,9 @@ class PostViewModel @Inject constructor(
                     )
                 }
             }
+            // A just-popped reader may still be finishing its confirmed floor
+            // write. Do not restore an older DB floor while that write is pending.
+            awaitPendingHistoryFloor(owner.uid, tid)
             val history = repo.history(tid, owner)
             _subject.value = history?.title.orEmpty()
             val restored = restoreReadingPosition(
@@ -199,6 +203,16 @@ class PostViewModel @Inject constructor(
             _totalPages.value = tp.coerceAtLeast(1)
             val renderData = prepareRenderData(result.posts, result.users)
             if (request != pageGeneration) return@launch
+            // The reader may confirm a floor as soon as Success becomes visible.
+            // Ensure its account-scoped history row exists before that can happen.
+            try {
+                session?.let { repo.recordHistory(tid, _subject.value, result.author, result.fid, it) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("NgaHistory", "阅读记录更新失败", e)
+            }
+            if (request != pageGeneration) return@launch
             _page.value = p
             savedStateHandle["readingPage"] = p
             _uiState.value = PostUiState.Success(
@@ -209,7 +223,6 @@ class PostViewModel @Inject constructor(
                 result.users,
                 renderData
             )
-            session?.let { repo.recordHistory(tid, _subject.value, result.author, result.fid, it) }
             _isRefreshing.value = false
         }
     }
@@ -468,10 +481,10 @@ class PostViewModel @Inject constructor(
     }
 
     fun updateReadFloor(floor: Int) {
-        savedStateHandle["readingFloor"] = floor.coerceAtLeast(0)
-        viewModelScope.launch {
-            session?.let { repo.updateHistoryFloor(tid, floor, it) }
-        }
+        val confirmed = floor.coerceAtLeast(0)
+        savedStateHandle["readingFloor"] = confirmed
+        val owner = session ?: return
+        enqueueHistoryFloor(repo, tid, confirmed, owner)
     }
 
     fun toggleFavorite() {
@@ -564,6 +577,50 @@ class PostViewModel @Inject constructor(
         // The last edit may be queued as navigation disposes the ViewModel.
         // Bounded draft jobs finish in this process scope; they carry a fixed account session.
         val draftScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+        // History writes must outlive an immediately popped reader. Each owner/thread
+        // has one ordered chain, so an older floor cannot finish after a newer one.
+        val historyScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val historyWriteLock = Any()
+        val pendingHistoryWrites = mutableMapOf<Pair<String, String>, Job>()
+
+        suspend fun awaitPendingHistoryFloor(ownerUid: String, tid: String) {
+            val key = ownerUid to tid
+            while (true) {
+                val pending = synchronized(historyWriteLock) { pendingHistoryWrites[key] }
+                    ?: return
+                pending.join()
+                // A newer write may have been enqueued while we awaited this one.
+                val next = synchronized(historyWriteLock) { pendingHistoryWrites[key] }
+                if (next == null || next === pending) return
+            }
+        }
+
+        fun enqueueHistoryFloor(
+            repo: NgaRepository, tid: String, floor: Int, owner: RequestPreferences
+        ) {
+            val key = owner.uid to tid
+            synchronized(historyWriteLock) {
+                val previous = pendingHistoryWrites[key]
+                val job = historyScope.launch(start = CoroutineStart.LAZY) {
+                    previous?.join()
+                    try {
+                        repo.updateHistoryFloor(tid, floor, owner)
+                    } catch (_: CancellationException) {
+                        // A switched account/revision must not write into an old session.
+                    } catch (e: Exception) {
+                        Log.w("NgaHistory", "阅读楼层保存失败", e)
+                    }
+                }
+                pendingHistoryWrites[key] = job
+                job.invokeOnCompletion {
+                    synchronized(historyWriteLock) {
+                        if (pendingHistoryWrites[key] === job) pendingHistoryWrites.remove(key)
+                    }
+                }
+                job.start()
+            }
+        }
     }
 }
 

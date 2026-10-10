@@ -12,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -20,6 +21,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextInputSelection
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.rememberNavController
@@ -37,6 +39,8 @@ import io.mockk.mockk
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Rule
 import org.junit.Test
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -48,6 +52,42 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ReaderStateTransitionRenderTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+
+    @Test fun targetJumpSavesConfirmedFloorInsteadOfPreviousIdleAnchor() {
+        val target = MutableStateFlow<Int?>(null)
+        val vm = fixture(target)
+        @Suppress("UNCHECKED_CAST")
+        val state = vm.uiState as MutableStateFlow<PostUiState>
+        val success = state.value as PostUiState.Success
+        val writes = mutableListOf<Int>()
+        every { vm.updateReadFloor(any()) } answers { writes.add(firstArg()); Unit }
+        every { vm.consumeTargetFloor() } answers { target.value = null }
+        val root = mockk<RootViewModel>(relaxed = true)
+        every { root.readingDockMode } returns MutableStateFlow(ReadingDockMode.AUTO)
+        every { root.readingTextScale } returns MutableStateFlow(1f)
+        compose.setContent {
+            NgaQingTheme(themeMode = "light") {
+                PostScreen(rememberNavController(), dark = false, viewModel = vm, root = root)
+            }
+        }
+        compose.onNodeWithTag("post-reading-list").performScrollToNode(hasText("#7"))
+        compose.waitForIdle()
+        val previous = writes.last()
+        assertFalse(previous == 5)
+        writes.clear()
+
+        compose.runOnUiThread {
+            target.value = 5
+            state.value = PostUiState.Loading
+        }
+        compose.waitForIdle()
+        compose.runOnUiThread { state.value = success.copy() }
+        compose.onNodeWithText("#5").assertIsDisplayed()
+        compose.waitForIdle()
+        assertEquals("the actual target floor must be the final saved anchor", 5, writes.last())
+        assertFalse("the previous list anchor must not be saved during a pending jump",
+            writes.contains(previous))
+    }
 
     @Test fun targetFloorAndReplySelectionSurviveWideNarrowWideAndFocus() {
         val width = mutableStateOf(986.dp)

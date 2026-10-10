@@ -1127,19 +1127,22 @@ class NgaRepository @Inject constructor(
     ) {
         val snapshot = requireSession(session)
         val owner = ownerOf(snapshot.uid)
-        val old = db.historyDao().get(owner, tid)
+        val dao = db.historyDao()
         requireCurrent(snapshot)
-        db.historyDao().insert(
+        dao.insertIfAbsent(
             HistoryEntity(
                 tid = tid,
-                title = title.ifBlank { old?.title.orEmpty() }.ifBlank { "（无标题）" },
-                author = author.ifBlank { old?.author.orEmpty() },
-                fid = fid.ifBlank { old?.fid.orEmpty() },
+                title = title.ifBlank { "（无标题）" },
+                author = author.ifBlank { "" },
+                fid = fid.ifBlank { "" },
                 lastVisited = System.currentTimeMillis(),
-                lastFloor = old?.lastFloor ?: 0,
                 ownerUid = owner
             )
         )
+        requireCurrent(snapshot)
+        // A metadata refresh must never replace a floor saved by a concurrent reader.
+        dao.updateMetadata(owner, tid, title.ifBlank { "" }, author.ifBlank { "" },
+            fid.ifBlank { "" }, System.currentTimeMillis())
     }
 
     suspend fun updateHistoryFloor(tid: String, floor: Int, session: RequestPreferences? = null) {
