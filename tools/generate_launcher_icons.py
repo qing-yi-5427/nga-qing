@@ -22,12 +22,12 @@ LEGACY_SIZES = {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 1
 
 # The mark, including its tail, stays inside the center 66 dp diameter circle.
 BUBBLE_PATH = (
-    "M42,28 H66 Q78,28 78,40 V64 Q78,76 66,76 "
-    "H53 L43,82 L41,76 Q30,75 30,64 V40 Q30,28 42,28 Z"
+    "M42,30 H66 Q78,30 78,42 V66 Q78,78 66,78 "
+    "H53 L43,84 L41,78 Q30,77 30,66 V42 Q30,30 42,30 Z"
 )
-N_PATH = "M39,41 H46 L63,60 V41 H70 V69 H63 L46,50 V69 H39 Z"
-N_POINTS = [(39, 41), (46, 41), (63, 60), (63, 41), (70, 41),
-            (70, 69), (63, 69), (46, 50), (46, 69), (39, 69)]
+N_PATH = "M39,40 H46 L63,59 V40 H70 V68 H63 L46,49 V68 H39 Z"
+N_POINTS = [(39, 40), (46, 40), (63, 59), (63, 40), (70, 40),
+            (70, 68), (63, 68), (46, 49), (46, 68), (39, 68)]
 
 
 def bubble_points(dy: float = 0.0) -> list[tuple[float, float]]:
@@ -43,17 +43,17 @@ def bubble_points(dy: float = 0.0) -> list[tuple[float, float]]:
             line(one * one * start[0] + 2 * one * t * control[0] + t * t * end[0],
                  one * one * start[1] + 2 * one * t * control[1] + t * t * end[1])
 
-    line(42, 28)
-    line(66, 28)
-    quad((66, 28), (78, 28), (78, 40))
-    line(78, 64)
-    quad((78, 64), (78, 76), (66, 76))
-    line(53, 76)
-    line(43, 82)
-    line(41, 76)
-    quad((41, 76), (30, 75), (30, 64))
-    line(30, 40)
-    quad((30, 40), (30, 28), (42, 28))
+    line(42, 30)
+    line(66, 30)
+    quad((66, 30), (78, 30), (78, 42))
+    line(78, 66)
+    quad((78, 66), (78, 78), (66, 78))
+    line(53, 78)
+    line(43, 84)
+    line(41, 78)
+    quad((41, 78), (30, 77), (30, 66))
+    line(30, 42)
+    quad((30, 42), (30, 30), (42, 30))
     return points
 
 
@@ -171,6 +171,16 @@ def write_preview() -> None:
     directory = ROOT / "design" / "icon-concepts"
     directory.mkdir(parents=True, exist_ok=True)
     preview.save(directory / "v8-blue-preview.png", optimize=True)
+    before_path = directory / "v8-blue-preview-before.png"
+    if before_path.exists():
+        before = Image.open(before_path).convert("RGB")
+        comparison = Image.new("RGB", (2500, 362), "#EBEFF5")
+        comparison_draw = ImageDraw.Draw(comparison)
+        comparison_draw.text((625, 8), "Before", fill="#29313D", font=font, anchor="mt")
+        comparison_draw.text((1875, 8), "Centered", fill="#29313D", font=font, anchor="mt")
+        comparison.paste(before, (0, 42))
+        comparison.paste(preview, (1250, 42))
+        comparison.save(directory / "v8-blue-centering-comparison.png", optimize=True)
 
 
 def main() -> None:
