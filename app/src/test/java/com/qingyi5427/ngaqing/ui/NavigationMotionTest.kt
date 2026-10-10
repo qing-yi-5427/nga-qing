@@ -7,11 +7,14 @@ import org.junit.Test
 
 class NavigationMotionTest {
     @Test fun rootTabsFollowVisualOrderEvenWhenNavigationPops() {
+        assertEquals(1, navigationDirection(Routes.DISCOVER, Routes.BOARDS, popping = false))
+        assertEquals(-1, navigationDirection(Routes.PROFILE, Routes.DISCOVER, popping = false))
         assertEquals(1, navigationDirection(Routes.BOARDS, Routes.FAVORITES, popping = false))
         assertEquals(-1, navigationDirection(Routes.PROFILE, Routes.BOARDS, popping = false))
         assertEquals(-1, navigationDirection(Routes.FAVORITES, Routes.BOARDS, popping = true))
         assertEquals(1, navigationDirection(Routes.BOARDS, Routes.PROFILE, popping = true))
         assertTrue(isRootTabSwitch(Routes.BOARDS, Routes.PROFILE))
+        assertTrue(isRootTabSwitch(Routes.DISCOVER, Routes.FAVORITES))
     }
 
     @Test fun childPushAndPopReverseAndSharedListsStayInPlace() {

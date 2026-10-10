@@ -20,16 +20,23 @@ class PaneLayoutTest {
         assertEquals(860f, pane.listWidth + pane.gutterWidth + pane.detailWidth)
     }
 
-    @Test fun verticalHingeSplitsTwoPanesWithoutCrossingCrease() {
+    @Test fun verticalHingeWithNarrowReadingSideUsesOneSafePane() {
         val fold = FoldGeometry(FoldBounds(425f, 0f, 435f, 608f), vertical = true, separating = true)
         val pane = calculatePaneLayout(860f, 608f, fold)
-        assertTrue(pane.isTwoPane)
-        assertTrue(pane.listWidth < fold.bounds.left)
-        assertTrue(pane.listWidth + pane.gutterWidth > fold.bounds.right)
+        assertFalse(pane.isTwoPane)
         assertTrue(
             pane.singlePaneLeft + pane.singlePaneWidth <= fold.bounds.left ||
                 pane.singlePaneLeft >= fold.bounds.right
         )
+    }
+
+    @Test fun sufficientlyWideVerticalHingeKeepsEachPaneReadable() {
+        val fold = FoldGeometry(FoldBounds(315f, 0f, 335f, 700f), vertical = true, separating = true)
+        val pane = calculatePaneLayout(850f, 700f, fold)
+        assertTrue(pane.isTwoPane)
+        assertTrue(pane.listWidth >= 250f)
+        assertTrue(pane.detailWidth >= 460f)
+        assertTrue(pane.listWidth < fold.bounds.left)
     }
 
     @Test fun narrowWindowWithHingeUsesOneSafeSide() {

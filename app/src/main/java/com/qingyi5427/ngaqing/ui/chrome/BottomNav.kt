@@ -31,15 +31,19 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.outlined.FavoriteBorder
-import androidx.compose.material.icons.outlined.Forum
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.ViewList
 import androidx.compose.material.icons.outlined.PersonOutline
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -65,8 +69,9 @@ private data class TabDef(
 )
 
 private val tabs = listOf(
-    TabDef(Routes.BOARDS, "版块", Icons.Filled.Forum, Icons.Outlined.Forum),
-    TabDef(Routes.FAVORITES, "收藏", Icons.Filled.Favorite, Icons.Outlined.FavoriteBorder),
+    TabDef(Routes.DISCOVER, "发现", Icons.Filled.Home, Icons.Outlined.Home),
+    TabDef(Routes.BOARDS, "版块", Icons.Filled.ViewList, Icons.Outlined.ViewList),
+    TabDef(Routes.FAVORITES, "收藏", Icons.Filled.Bookmark, Icons.Outlined.BookmarkBorder),
     TabDef(Routes.PROFILE, "我的", Icons.Filled.Person, Icons.Outlined.PersonOutline)
 )
 
@@ -76,7 +81,7 @@ val RootNavigationRailWidth = 88.dp
 /** Wide destinations provide this so their existing bottom dock calls become no-ops. */
 val LocalRootNavigationRail = staticCompositionLocalOf { false }
 
-private fun NavHostController.openRootTab(route: String) {
+internal fun NavHostController.openRootTab(route: String) {
     navigate(route) {
         popUpTo(graph.findStartDestination().id) { saveState = true }
         launchSingleTop = true
@@ -93,7 +98,7 @@ private fun NavHostController.openBoardDirectory() {
     }
 }
 
-/** Existing call sites keep their actions and title behavior; only the chrome is replaced. */
+/** Lightweight secondary title bar; existing screens keep their navigation and actions. */
 @Composable
 fun AppTopBar(
     title: String,
@@ -105,32 +110,27 @@ fun AppTopBar(
     Row(
         Modifier.fillMaxWidth()
             .windowInsetsPadding(windowInsets)
-            .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp),
+            .background(MaterialTheme.colorScheme.surface)
+            .heightIn(min = 56.dp)
+            .padding(start = 12.dp, end = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         if (navigationIcon != null) {
-            NgaGlassSurface(shape = RoundedCornerShape(16.dp)) {
-                Box(Modifier.heightIn(min = 52.dp), contentAlignment = Alignment.Center) {
-                    navigationIcon()
-                }
+            Box(Modifier.heightIn(min = 48.dp), contentAlignment = Alignment.Center) {
+                navigationIcon()
             }
         }
-        Text(
-            title,
-            modifier = Modifier.weight(1f)
-                .then(if (onTitleClick != null) Modifier.clickable(onClick = onTitleClick) else Modifier)
-                .padding(horizontal = 4.dp, vertical = 12.dp),
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
+        Box(Modifier.weight(1f).heightIn(min = 48.dp)
+            .then(if (onTitleClick != null) Modifier.clickable(onClick = onTitleClick) else Modifier)
+            .padding(horizontal = 4.dp), contentAlignment = Alignment.CenterStart) {
+            Text(title, style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
         if (actions != null) {
-            NgaGlassSurface(shape = RoundedCornerShape(16.dp)) {
-                Row(Modifier.heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
-                    actions()
-                }
+            Row(Modifier.heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                actions()
             }
         }
     }
@@ -138,7 +138,12 @@ fun AppTopBar(
 
 /** Compact root navigation floats over the content; callers place it in a root Box overlay. */
 @Composable
-fun AppBottomBar(nav: NavHostController, currentRoute: String, visible: Boolean = true) {
+fun AppBottomBar(
+    nav: NavHostController,
+    currentRoute: String,
+    visible: Boolean = true,
+    selectedRoute: String = currentRoute
+) {
     if (LocalRootNavigationRail.current) return
     Box(
         Modifier.fillMaxWidth()
@@ -151,24 +156,25 @@ fun AppBottomBar(nav: NavHostController, currentRoute: String, visible: Boolean 
             enter = fadeIn(tween(180)) + slideInVertically(tween(180)) { it / 2 },
             exit = fadeOut(tween(180)) + slideOutVertically(tween(180)) { it / 2 }
         ) {
-            NgaGlassSurface(modifier = Modifier.testTag("root-bottom-dock"), shape = RoundedCornerShape(24.dp)) {
+            Surface(
+                modifier = Modifier.testTag("root-bottom-dock"),
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                shadowElevation = 12.dp
+            ) {
                 Row(
-                    Modifier.padding(5.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(0.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     tabs.forEach { tab ->
-                        val selected = currentRoute == tab.route
+                        val selected = selectedRoute == tab.route
                         Column(
-                            Modifier.width(70.dp).height(56.dp)
+                            Modifier.width(64.dp).heightIn(min = 50.dp)
                                 .testTag("root-tab-${tab.route}")
-                                .background(
-                                    if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.82f)
-                                    else Color.Transparent,
-                                    RoundedCornerShape(18.dp)
-                                )
                                 .selectable(selected = selected, role = Role.Tab, onClick = {
-                                    if (!selected) nav.openRootTab(tab.route)
+                                    if (currentRoute != tab.route) nav.openRootTab(tab.route)
                                 }),
                             verticalArrangement = Arrangement.Center,
                             horizontalAlignment = Alignment.CenterHorizontally
@@ -182,7 +188,8 @@ fun AppBottomBar(nav: NavHostController, currentRoute: String, visible: Boolean 
                             )
                             Text(
                                 tab.label,
-                                fontSize = 10.sp,
+                                fontSize = 11.sp,
+                                lineHeight = 14.sp,
                                 maxLines = 1,
                                 color = if (selected) MaterialTheme.colorScheme.primary
                                 else MaterialTheme.colorScheme.onSurfaceVariant
@@ -226,7 +233,7 @@ fun AppNavigationRail(
                 tabs.forEach { tab ->
                     val selected = selectedRoute == tab.route
                     Column(
-                        Modifier.width(56.dp).height(60.dp)
+                        Modifier.width(56.dp).heightIn(min = 60.dp)
                             .testTag("root-tab-${tab.route}")
                             .background(
                                 if (selected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.82f)
@@ -254,7 +261,7 @@ fun AppNavigationRail(
                         )
                         Text(
                             tab.label,
-                            fontSize = 10.sp,
+                            fontSize = 11.sp,
                             maxLines = 1,
                             color = if (selected) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurfaceVariant

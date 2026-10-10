@@ -26,6 +26,14 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material3.Surface
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.MoreVert
@@ -51,29 +59,39 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.qingyi5427.ngaqing.data.local.FavoriteEntity
 import com.qingyi5427.ngaqing.ui.Routes
+import com.qingyi5427.ngaqing.ui.adaptive.LocalV8LayoutPolicy
 import com.qingyi5427.ngaqing.ui.chrome.AppBottomBar
 import com.qingyi5427.ngaqing.ui.chrome.AppTopBar
+import com.qingyi5427.ngaqing.ui.chrome.EditorialRootTopBar
 import com.qingyi5427.ngaqing.ui.chrome.LocalRootNavigationRail
 import com.qingyi5427.ngaqing.ui.chrome.rememberScrollDockState
 import com.qingyi5427.ngaqing.ui.design.NgaBackdropScope
 import com.qingyi5427.ngaqing.ui.design.ngaBackdropSource
 import com.qingyi5427.ngaqing.ui.util.formatAuthorName
+import com.qingyi5427.ngaqing.ui.util.formatRelative
 
 @Composable
 fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hiltViewModel()) {
@@ -83,6 +101,9 @@ fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hilt
     val syncMessage by viewModel.syncMessage.collectAsStateWithLifecycle()
     val syncError by viewModel.syncError.collectAsStateWithLifecycle()
     val actionError by viewModel.actionError.collectAsStateWithLifecycle()
+    val visitedTids by viewModel.visitedTids.collectAsStateWithLifecycle()
+    val policy = LocalV8LayoutPolicy.current
+    val compactHeight = policy.compactHeight || LocalConfiguration.current.screenHeightDp < 480
     val context = LocalContext.current
     val hasDock = !LocalRootNavigationRail.current && WindowInsets.ime.getBottom(LocalDensity.current) == 0
     val dockState = rememberScrollDockState()
@@ -92,10 +113,25 @@ fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hilt
     var pendingDelete by remember { mutableStateOf<FavoriteEntity?>(null) }
     var pendingMove by remember { mutableStateOf<FavoriteEntity?>(null) }
     var folderInput by remember { mutableStateOf("") }
-    var query by remember { mutableStateOf("") }
-    var searchOpen by remember { mutableStateOf(false) }
-    var selectedFolder by remember { mutableStateOf<String?>(null) }
-    var sortMenu by remember { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(searchOpen) {
+        if (!searchOpen) dockState.show()
+    }
+    var selectedFolder by rememberSaveable { mutableStateOf<String?>(null) }
+    var readFilter by rememberSaveable { mutableStateOf("全部") }
+    val gridState = rememberLazyGridState()
+    LaunchedEffect(query, selectedFolder) {
+        viewModel.setQuery(query)
+        viewModel.setFolder(selectedFolder)
+    }
+    val visibleFavorites = remember(favorites, visitedTids, readFilter) {
+        favorites.filter { favorite -> when (readFilter) {
+            "未读" -> favorite.tid !in visitedTids
+            "已读" -> favorite.tid in visitedTids
+            else -> true
+        } }
+    }
     LaunchedEffect(syncMessage) {
         syncMessage?.let {
             android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show()
@@ -135,66 +171,49 @@ fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hilt
     ) {
     Column(Modifier.fillMaxSize()
         .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))) {
-        AppTopBar("收藏", actions = {
-            IconButton(onClick = { searchOpen = true }) {
-                Icon(Icons.Filled.Search, contentDescription = "搜索收藏",
-                    tint = if (query.isNotBlank()) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurface)
-            }
-            IconButton(onClick = viewModel::syncFromServer, enabled = !syncing) {
-                if (syncing) CircularProgressIndicator(Modifier.padding(10.dp), strokeWidth = 2.dp)
-                else Icon(Icons.Filled.Sync, contentDescription = "与 NGA 收藏同步")
-            }
-            Box {
-                IconButton(onClick = { sortMenu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "排序") }
-                DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
-                    listOf(
-                        FavoriteSort.NEWEST to "按收藏时间",
-                        FavoriteSort.TITLE to "按标题",
-                        FavoriteSort.AUTHOR to "按作者"
-                    ).forEach { (sort, label) ->
-                        DropdownMenuItem(text = { Text(label) }, onClick = {
-                            sortMenu = false
-                            viewModel.setSort(sort)
-                        })
+        val pagePadding = if (policy.availableWidthDp >= 840f) 34.dp
+            else if (policy.mediumComfortTypography) 30.dp else 26.dp
+        EditorialRootTopBar(nav, Routes.FAVORITES, "阅读资料库",
+            Modifier.padding(horizontal = pagePadding))
+        FavoritesTools(query, folders, selectedFolder, readFilter, favorites.size,
+            comfortable = policy.mediumComfortTypography,
+            compact = compactHeight,
+            pagePadding = pagePadding,
+            visibleCount = visibleFavorites.size,
+            syncing = syncing,
+            onReadFilter = { readFilter = it },
+            onClearQuery = { query = ""; viewModel.setQuery("") },
+            onFolderSelect = { selectedFolder = it; viewModel.setFolder(it) },
+            onSearch = { searchOpen = true },
+            onSync = viewModel::syncFromServer,
+            onSort = viewModel::setSort)
+        BoxWithConstraints(Modifier.weight(1f)) {
+            val twoColumns = policy.favoriteColumns == 2 && maxWidth >= 620.dp
+            if (visibleFavorites.isEmpty()) {
+                FavoritesEmpty(filtered = query.isNotBlank() || selectedFolder != null || readFilter != "全部")
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(if (twoColumns) 2 else 1),
+                    modifier = Modifier.fillMaxSize().ngaBackdropSource(),
+                    state = gridState,
+                    contentPadding = PaddingValues(start = pagePadding, end = pagePadding,
+                        top = 8.dp, bottom = if (hasDock) dockClearance else 24.dp),
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp),
+                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)
+                ) {
+                    gridItems(visibleFavorites, key = { it.tid }) { favorite ->
+                        val open = { nav.navigate(Routes.postRoute(favorite.tid)) }
+                        val delete = { pendingDelete = favorite }
+                        val move = { pendingMove = favorite; folderInput = favorite.folder }
+                        if (twoColumns) FavoriteCard(favorite, policy.mediumComfortTypography,
+                            favorite.tid in visitedTids, open, delete, move)
+                        else SwipeToDeleteFavorite(favorite,
+                            comfortable = policy.mediumComfortTypography,
+                            visited = favorite.tid in visitedTids,
+                            onOpen = open, onDelete = delete, onMove = move)
                     }
                 }
             }
-        })
-        LazyColumn(Modifier.weight(1f).ngaBackdropSource(), contentPadding = PaddingValues(bottom = if (hasDock) dockClearance else 24.dp)) {
-            item(key = "favorites-tools", contentType = "tools") {
-                FavoritesTools(query, folders, selectedFolder,
-                    onClearQuery = { query = ""; viewModel.setQuery("") },
-                    onFolderSelect = { selectedFolder = it; viewModel.setFolder(it) })
-            }
-            if (favorites.isEmpty()) {
-                item(key = "favorites-empty", contentType = "empty") {
-                    FavoritesEmpty(
-                        filtered = query.isNotBlank() || selectedFolder != null
-                    )
-                }
-            } else {
-                item(key = "favorites-list-label", contentType = "section-label") {
-                    Text("收藏的讨论", style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp))
-                }
-                items(favorites, key = { it.tid }, contentType = { "favorite-row" }) { favorite ->
-                    SwipeToDeleteFavorite(
-                        favorite,
-                        onOpen = { nav.navigate(Routes.postRoute(favorite.tid)) },
-                        onDelete = { pendingDelete = favorite },
-                        onMove = {
-                            pendingMove = favorite
-                            folderInput = favorite.folder
-                        }
-                    )
-                    HorizontalDivider(
-                        color = MaterialTheme.colorScheme.outlineVariant,
-                        modifier = Modifier.padding(start = 20.dp)
-                    )
-                }
-        }
         }
     }
     if (hasDock) Box(Modifier.align(Alignment.BottomCenter)) {
@@ -300,39 +319,139 @@ private fun FavoritesTools(
     query: String,
     folders: List<String>,
     selectedFolder: String?,
+    readFilter: String,
+    count: Int,
+    comfortable: Boolean,
+    compact: Boolean,
+    pagePadding: Dp,
+    visibleCount: Int,
+    syncing: Boolean,
+    onReadFilter: (String) -> Unit,
     onClearQuery: () -> Unit,
-    onFolderSelect: (String?) -> Unit
+    onFolderSelect: (String?) -> Unit,
+    onSearch: () -> Unit,
+    onSync: () -> Unit,
+    onSort: (FavoriteSort) -> Unit
 ) {
-    Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 4.dp)) {
-        Text("稍后阅读", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        if (query.isNotBlank()) {
-            TextButton(onClick = onClearQuery, modifier = Modifier.heightIn(min = 48.dp)) {
-                Text("清除搜索：$query", maxLines = 1, overflow = TextOverflow.Ellipsis)
+    var menuOpen by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth().padding(horizontal = pagePadding,
+        vertical = if (compact) 2.dp else 10.dp)) {
+        if (!compact) {
+            Text("COLLECTION  ·  KEEP READING", fontSize = 11.sp, lineHeight = 15.sp,
+                fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.outline)
+        }
+        Row(Modifier.fillMaxWidth().padding(top = if (compact) 3.dp else 9.dp),
+            verticalAlignment = Alignment.Bottom) {
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text("收藏", fontSize = if (comfortable) 40.sp else if (compact) 28.sp else 35.sp,
+                        lineHeight = if (comfortable) 46.sp else if (compact) 34.sp else 40.sp,
+                        fontWeight = FontWeight.Medium)
+                    Text(".", fontSize = if (comfortable) 40.sp else if (compact) 28.sp else 35.sp,
+                        lineHeight = if (comfortable) 46.sp else if (compact) 34.sp else 40.sp,
+                        color = MaterialTheme.colorScheme.primary)
+                }
+                if (!compact) Text("值得留下的内容，随时接着读。",
+                    fontSize = if (comfortable) 14.sp else 13.sp,
+                    lineHeight = if (comfortable) 20.sp else 18.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp))
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text("$count", fontSize = if (comfortable) 32.sp else 28.sp,
+                    lineHeight = if (comfortable) 37.sp else 33.sp,
+                    fontWeight = FontWeight.Medium)
+                Text("篇收藏内容", fontSize = 11.sp, lineHeight = 15.sp,
+                    color = MaterialTheme.colorScheme.outline)
+            }
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant,
+            modifier = Modifier.padding(top = if (compact) 10.dp else 21.dp))
+        Row(Modifier.fillMaxWidth().padding(top = 9.dp, bottom = 10.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Surface(shape = RoundedCornerShape(11.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant) {
+                Row(Modifier.padding(3.dp), verticalAlignment = Alignment.CenterVertically) {
+                    listOf("全部", "未读", "已读").forEach { filter ->
+                        val selected = readFilter == filter
+                        Surface(onClick = { onReadFilter(filter) },
+                            shape = RoundedCornerShape(9.dp),
+                            color = if (selected) MaterialTheme.colorScheme.surface
+                                else MaterialTheme.colorScheme.surfaceVariant,
+                            shadowElevation = if (selected) 2.dp else 0.dp,
+                            modifier = Modifier.heightIn(min = 43.dp)) {
+                            Box(Modifier.padding(horizontal = if (comfortable) 17.dp else 12.dp),
+                                contentAlignment = Alignment.Center) {
+                                Text(filter, fontSize = if (comfortable) 13.sp else 12.sp,
+                                    lineHeight = 16.sp,
+                                    color = if (selected) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            if (!compact && comfortable) Text("${visibleCount} 个结果",
+                fontSize = 12.sp, lineHeight = 16.sp,
+                color = MaterialTheme.colorScheme.outline)
+            Box {
+                IconButton(onClick = { menuOpen = true }, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Icon(Icons.Filled.MoreVert, contentDescription = "搜索、排序与同步收藏",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(text = { Text("搜索收藏") }, leadingIcon = {
+                        Icon(Icons.Filled.Search, contentDescription = null)
+                    }, onClick = { menuOpen = false; onSearch() })
+                    if (query.isNotBlank() || selectedFolder != null) {
+                        DropdownMenuItem(text = { Text("清除搜索与分组") }, onClick = {
+                            menuOpen = false; onClearQuery(); onFolderSelect(null)
+                        })
+                    }
+                    DropdownMenuItem(text = { Text(if (syncing) "正在同步" else "同步 NGA 收藏") },
+                        leadingIcon = { Icon(Icons.Filled.Sync, contentDescription = null) },
+                        enabled = !syncing,
+                        onClick = { menuOpen = false; onSync() })
+                    HorizontalDivider()
+                    listOf(FavoriteSort.NEWEST to "按最近收藏", FavoriteSort.TITLE to "按标题",
+                        FavoriteSort.AUTHOR to "按作者").forEach { (sort, label) ->
+                        DropdownMenuItem(text = { Text(label) }, onClick = {
+                            menuOpen = false; onSort(sort)
+                        })
+                    }
+                    if (folders.isNotEmpty()) {
+                        HorizontalDivider()
+                        DropdownMenuItem(text = { Text("全部分组") }, onClick = {
+                            menuOpen = false; onFolderSelect(null)
+                        })
+                        folders.forEach { folder ->
+                            DropdownMenuItem(text = { Text("分组 · $folder") }, onClick = {
+                                menuOpen = false; onFolderSelect(folder)
+                            })
+                        }
+                    }
+                }
+            }
+        }
+        if (!compact && (query.isNotBlank() || selectedFolder != null)) {
+            TextButton(onClick = {
+                onClearQuery(); onFolderSelect(null)
+            }, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text(listOfNotNull(query.takeIf { it.isNotBlank() }?.let { "搜索：$it" },
+                    selectedFolder?.let { "分组：$it" }).joinToString("  ·  ") + "  ×",
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        (listOf<String?>(null) + folders).forEach { folder ->
-            FilterChip(
-                selected = selectedFolder == folder,
-                onClick = { onFolderSelect(folder) },
-                label = { Text(folder ?: "全部") },
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.padding(end = 8.dp).heightIn(min = 48.dp)
-            )
-        }
-    }
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant,
-        modifier = Modifier.padding(top = 8.dp))
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SwipeToDeleteFavorite(
     item: FavoriteEntity,
+    comfortable: Boolean,
+    visited: Boolean,
     onOpen: () -> Unit,
     onDelete: () -> Unit,
     onMove: () -> Unit
@@ -354,73 +473,94 @@ private fun SwipeToDeleteFavorite(
         backgroundContent = {
             Box(
                 Modifier.fillMaxSize()
-                    .background(MaterialTheme.colorScheme.errorContainer)
+                    .background(if (state.targetValue == SwipeToDismissBoxValue.EndToStart)
+                        MaterialTheme.colorScheme.errorContainer else Color.Transparent)
                     .padding(end = 22.dp),
                 contentAlignment = Alignment.CenterEnd
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "取消收藏",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onErrorContainer
-                    )
-                    Icon(
-                        Icons.Filled.DeleteOutline,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier.padding(start = 8.dp)
-                    )
+                if (state.targetValue == SwipeToDismissBoxValue.EndToStart) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("取消收藏", style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onErrorContainer)
+                        Icon(Icons.Filled.DeleteOutline, contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.padding(start = 8.dp))
+                    }
                 }
             }
         }
     ) {
-        FavoriteRow(item, onOpen, onDelete, onMove)
+        FavoriteCard(item, comfortable, visited, onOpen, onDelete, onMove)
     }
 }
 
 @Composable
-private fun FavoriteRow(item: FavoriteEntity, onOpen: () -> Unit, onDelete: () -> Unit, onMove: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
-            .clickable(onClick = onOpen)
-            .heightIn(min = 72.dp)
-            .padding(start = 20.dp, end = 12.dp, top = 14.dp, bottom = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
+private fun FavoriteCard(
+    item: FavoriteEntity,
+    comfortable: Boolean,
+    visited: Boolean,
+    onOpen: () -> Unit,
+    onDelete: () -> Unit,
+    onMove: () -> Unit
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    Surface(
+        onClick = onOpen,
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = Modifier.fillMaxWidth().heightIn(min = if (comfortable) 137.dp else 126.dp)
     ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                item.title.ifBlank { "（无标题）" },
-                style = MaterialTheme.typography.titleMedium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 5.dp)) {
-                if (item.author.isNotBlank()) {
-                    Text(
-                        formatAuthorName(item.author),
-                        style = MaterialTheme.typography.labelMedium,
+        Column(Modifier.padding(start = 17.dp, end = 9.dp, top = 13.dp, bottom = 8.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(item.folder.ifBlank { "默认分组" },
+                    color = MaterialTheme.colorScheme.primary,
+                    fontSize = if (comfortable) 13.sp else 12.sp,
+                    lineHeight = if (comfortable) 18.sp else 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f))
+                Surface(shape = RoundedCornerShape(7.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant) {
+                    Text(if (visited) "已读" else "稍后再读",
+                        fontSize = 11.sp, lineHeight = 15.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Spacer(Modifier.width(8.dp))
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp))
                 }
-                TextButton(onClick = onMove,
-                    modifier = Modifier.heightIn(min = 48.dp).widthIn(max = 140.dp)) {
-                    Text(item.folder, style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary, maxLines = 1,
-                        overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.width(7.dp))
+            }
+            Text(item.title.ifBlank { "（无标题）" },
+                fontSize = if (comfortable) 17.sp else 15.sp,
+                lineHeight = if (comfortable) 25.sp else 22.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 2, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).padding(top = 10.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                val byline = listOfNotNull(
+                    item.author.takeIf { it.isNotBlank() }?.let(::formatAuthorName),
+                    item.ts.takeIf { it > 0L }?.let(::formatRelative)
+                ).joinToString(" · ")
+                Text(byline,
+                    fontSize = if (comfortable) 12.sp else 11.sp,
+                    lineHeight = 16.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f))
+                Box {
+                    IconButton(onClick = { menuOpen = true }) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = "管理收藏 ${item.title}",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(text = { Text("移动到其他分组") }, onClick = {
+                            menuOpen = false; onMove()
+                        })
+                        DropdownMenuItem(text = { Text("取消收藏") }, onClick = {
+                            menuOpen = false; onDelete()
+                        })
+                    }
                 }
             }
-        }
-        IconButton(onClick = onDelete) {
-            Icon(
-                Icons.Filled.DeleteOutline,
-                contentDescription = "取消收藏 ${item.title}",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }

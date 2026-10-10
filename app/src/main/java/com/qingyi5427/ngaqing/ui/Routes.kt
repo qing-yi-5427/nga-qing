@@ -5,6 +5,7 @@ import android.net.Uri
 object Routes {
     const val LOGIN = "login"
     const val ADD_ACCOUNT = "login/add-account"
+    const val DISCOVER = "discover"
     const val BOARDS = "boards"
     const val THREADS = "threads/{fid}/{name}?stid={stid}"
     const val POSTS = "posts/{tid}"

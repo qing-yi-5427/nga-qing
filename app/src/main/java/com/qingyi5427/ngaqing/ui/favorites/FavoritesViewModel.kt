@@ -35,6 +35,10 @@ class FavoritesViewModel @Inject constructor(
     val folders: StateFlow<List<String>> = repo.favorites()
         .map { items -> items.map { it.folder }.distinct().sorted() }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    /** Read status comes from the same account-scoped history as the reader. */
+    val visitedTids: StateFlow<Set<String>> = repo.history()
+        .map { items -> items.mapTo(mutableSetOf()) { it.tid } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
     val favorites: StateFlow<List<FavoriteEntity>> =
         combine(repo.favorites(), query, sort, folder) { items, q, order, selectedFolder ->
             items.asSequence()

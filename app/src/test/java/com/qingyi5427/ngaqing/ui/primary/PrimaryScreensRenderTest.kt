@@ -16,6 +16,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.assertIsDisplayed
@@ -45,6 +49,8 @@ import com.qingyi5427.ngaqing.data.model.Post
 import com.qingyi5427.ngaqing.data.model.ThreadItem
 import com.qingyi5427.ngaqing.data.local.ReadingDockMode
 import com.qingyi5427.ngaqing.ui.ReadingPane
+import com.qingyi5427.ngaqing.ui.PostRouteContent
+import com.qingyi5427.ngaqing.ui.resolvePostRouteLayout
 import com.qingyi5427.ngaqing.ui.Routes
 import com.qingyi5427.ngaqing.ui.adaptive.calculatePaneLayout
 import com.qingyi5427.ngaqing.ui.adaptive.LocalV8LayoutPolicy
@@ -80,7 +86,7 @@ class PrimaryScreensRenderTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
     @Test
-    @Config(sdk = [33], qualifiers = "w1200dp-h800dp")
+    @Config(sdk = [33], qualifiers = "w986dp-h698dp")
     fun wideReadingShowsSelectedThreadAndProductionPostSideBySide() {
         val subject = "周末探索路线与地图标记"
         val threads = mockk<ThreadListViewModel>(relaxed = true)
@@ -141,32 +147,51 @@ class PrimaryScreensRenderTest {
         val root = mockk<RootViewModel>(relaxed = true)
         every { root.blacklistUsers } returns MutableStateFlow(emptySet())
         every { root.blacklistKeywords } returns MutableStateFlow(emptySet())
+        every { root.readingDockMode } returns MutableStateFlow(ReadingDockMode.AUTO)
+        every { root.readingTextScale } returns MutableStateFlow(1f)
         render { nav ->
-            ReadingPane(calculatePaneLayout(1200f, 800f, null), nav, Routes.POSTS,
+            ReadingPane(calculatePaneLayout(986f, 698f, null), nav, Routes.POSTS,
                 railInsets = WindowInsets(0.dp, 24.dp, 0.dp, 32.dp)) { readingPanes ->
-                Row(Modifier.fillMaxSize()) {
-                    Box(Modifier.width(readingPanes.listWidth.dp).fillMaxHeight()) {
-                        ThreadListScreen(nav, threads, root, selectedTid = "101")
-                    }
-                    Spacer(Modifier.width(readingPanes.gutterWidth.dp))
-                    Box(Modifier.weight(1f).fillMaxHeight()) {
-                        PostScreen(nav, posts, dark = false)
-                    }
+                var focusMode by remember { mutableStateOf(false) }
+                CompositionLocalProvider(LocalV8LayoutPolicy provides V8LayoutPolicy(
+                    availableWidthDp = 986f, availableHeightDp = 698f, readerTwoPane = true
+                )) {
+                    PostRouteContent(readingPanes,
+                        resolvePostRouteLayout(readingPanes, hasThreadSource = true, focusMode = focusMode),
+                        readerPaneWidth = readingPanes.listWidth,
+                        onReaderPaneWidthChange = {},
+                        threadList = {
+                            ThreadListScreen(nav, threads, root, selectedTid = "101")
+                        }, post = {
+                            PostScreen(nav, dark = false, viewModel = posts, root = root,
+                                isFocusMode = focusMode,
+                                onToggleFocus = { focusMode = !focusMode },
+                                onShowBoards = {}, boardName = "探索交流")
+                        })
                 }
             }
         }
         compose.onNode(isSelected() and hasText(subject)).assertIsDisplayed()
         val selectedTitle = compose.onNode(isSelected() and hasText(subject)).getUnclippedBoundsInRoot()
         val readingText = compose.onNodeWithText(post.content).assertIsDisplayed().getUnclippedBoundsInRoot()
-        compose.onNodeWithText("回复 2").performClick()
-        val replyAction = compose.onNodeWithText("回复").assertIsDisplayed().getUnclippedBoundsInRoot()
+        compose.onNodeWithText("回复 1").performClick()
+        val replyAction = compose.onNodeWithText("写回复").assertIsDisplayed().getUnclippedBoundsInRoot()
         check(selectedTitle.right < readingText.left)
-        check(replyAction.left > selectedTitle.right && replyAction.right <= 1200.dp)
+        check(replyAction.left > selectedTitle.right && replyAction.right <= 986.dp)
         compose.onNodeWithTag("root-navigation-group").assertDoesNotExist()
-        check(readingText.right - readingText.left > 500.dp) { "Reader should gain width without a permanent third rail" }
+        check(readingText.right - readingText.left > 400.dp) { "Reader should gain width without a permanent third rail" }
+        compose.onNodeWithText("探索交流 / 正在阅读").assertIsDisplayed()
+        compose.onNodeWithText("专注阅读").assertIsDisplayed()
         compose.runOnUiThread {
-            saveNativeScreenshot(compose.activity, "primary-reading-1200x800-light.png")
+            saveNativeScreenshot(compose.activity, "v8-posts-html-innerL-986x698.png")
         }
+        compose.onNodeWithText("专注阅读").performClick()
+        compose.onNodeWithText("恢复双栏").assertIsDisplayed()
+        compose.onNode(isSelected() and hasText(subject)).assertDoesNotExist()
+        compose.onNodeWithText("恢复双栏").performClick()
+        compose.onNodeWithText("专注阅读").assertIsDisplayed()
+        compose.onNode(isSelected() and hasText(subject)).assertIsDisplayed()
+        compose.onNodeWithText("探索交流 / 正在阅读").assertIsDisplayed()
     }
 
     @Test fun threadListShowsRowsAndErrorAtNarrowWidth() {
@@ -202,7 +227,7 @@ class PrimaryScreensRenderTest {
         compose.runOnUiThread {
             saveNativeScreenshot(compose.activity, "primary-thread-320-light-normal.png")
         }
-        compose.onNode(hasText("寂寞的车") and hasClickAction()).assertIsDisplayed()
+        compose.onNodeWithContentDescription("返回版块目录").assertIsDisplayed()
         compose.onAllNodesWithText("寂寞的车").assertCountEquals(1)
         val threadTitle = compose.onNodeWithText("这是一篇需要换行的主题标题")
             .assertIsDisplayed().getUnclippedBoundsInRoot()
@@ -238,7 +263,7 @@ class PrimaryScreensRenderTest {
         every { root.blacklistUsers } returns MutableStateFlow(emptySet())
         every { root.blacklistKeywords } returns MutableStateFlow(emptySet())
         render(fontScale = 2f) { nav -> ThreadListScreen(nav, vm, root) }
-        compose.onNodeWithText("发主题").assertIsDisplayed()
+        compose.onNodeWithContentDescription("发主题").assertIsDisplayed()
         compose.onNodeWithText("主题 1：阅读与讨论").performScrollTo().assertIsDisplayed()
     }
 
@@ -276,8 +301,12 @@ class PrimaryScreensRenderTest {
         every { vm.replySucceeded } returns MutableStateFlow(false)
         every { vm.favoriteError } returns MutableStateFlow<String?>(null)
         render(themeMode = "dark", fontScale = 2f) { nav -> PostScreen(nav, vm, dark = true) }
-        compose.onNodeWithText("回复 1").performClick()
-        compose.onNodeWithContentDescription("翻页，当前第 1 页，共 123456 页").assertIsDisplayed()
+        compose.onNodeWithText("回复 0").performClick()
+        compose.onNodeWithContentDescription("更多").performClick()
+        compose.onNodeWithText("翻页").assertIsDisplayed()
+        compose.onNodeWithText("翻页").performClick()
+        compose.onNodeWithText("共 123456 页").assertIsDisplayed()
+        compose.onNodeWithText("前往第 1 页").performClick()
         compose.runOnUiThread {
             saveNativeScreenshot(compose.activity, "primary-post-320-dark-2x.png")
         }
@@ -291,10 +320,10 @@ class PrimaryScreensRenderTest {
         check(ownerBadge.right <= ownerFloor.left && ownerFloor.right <= ownerMenu.left)
         compose.onNodeWithTag("post-reading-list").performScrollToIndex(1)
         compose.onNodeWithText("#370320").assertIsDisplayed()
-        val longPageAction = compose.onNodeWithContentDescription("翻页，当前第 12345 页，共 123456 页")
-            .assertIsDisplayed().getUnclippedBoundsInRoot()
-        check(longPageAction.right - longPageAction.left in 48.dp..86.dp)
-        compose.onNodeWithText("12345", substring = false).assertIsDisplayed()
+        compose.onNodeWithContentDescription("更多").performClick()
+        compose.onNodeWithText("翻页").performClick()
+        compose.onNodeWithText("共 123456 页").assertIsDisplayed()
+        compose.onNodeWithText("前往第 12345 页").performClick()
         compose.runOnUiThread {
             saveNativeScreenshot(compose.activity, "primary-post-320-dark-2x-long-page.png")
         }
@@ -346,20 +375,32 @@ class PrimaryScreensRenderTest {
         every { vm.replySucceeded } returns MutableStateFlow(false)
         every { vm.favoriteError } returns MutableStateFlow<String?>(null)
         render { nav -> PostScreen(nav, vm, dark = false) }
-        compose.onNode(hasText("一篇正常阅读的主题") and hasClickAction()).assertIsDisplayed()
+        compose.onNodeWithText("一篇正常阅读的主题").assertIsDisplayed()
         compose.onNodeWithText(post.content).assertIsDisplayed()
-        compose.onNodeWithText("回复 2").performClick()
+        compose.onNodeWithText("回复 1").performClick()
         val authorAction = compose.onNodeWithContentDescription("只看楼主")
             .assertIsDisplayed().getUnclippedBoundsInRoot()
-        val pageAction = compose.onNodeWithContentDescription("翻页，当前第 1 页，共 1 页")
+        val jumpAction = compose.onNodeWithContentDescription("跳转楼层")
             .assertIsDisplayed().getUnclippedBoundsInRoot()
-        val replyAction = compose.onNodeWithContentDescription("回复").assertIsDisplayed().getUnclippedBoundsInRoot()
+        val replyAction = compose.onNodeWithText("写回复").assertIsDisplayed().getUnclippedBoundsInRoot()
         check(authorAction.right - authorAction.left >= 48.dp)
-        check(pageAction.right - pageAction.left >= 48.dp)
-        check(authorAction.left >= pageAction.right && replyAction.left >= authorAction.right)
-        check(replyAction.right - pageAction.left < 250.dp) {
-            "Expanded reading actions should remain compact"
+        check(jumpAction.right - jumpAction.left >= 48.dp)
+        // Four HTML actions form a deliberate 2×2 grid at 320dp; the old one-row
+        // left-to-right assertion no longer describes the visible controls.
+        check(authorAction.top >= jumpAction.bottom) { "Second action row must not overlap the first" }
+        check(replyAction.top >= authorAction.top && replyAction.right <= 304.dp) {
+            "Reply action must remain in the safe reader width"
         }
+        compose.onNodeWithContentDescription("更多").performClick()
+        compose.onNodeWithText("翻页").performClick()
+        compose.onNodeWithText("共 1 页").assertIsDisplayed()
+        compose.onNodeWithText("前往第 1 页").performClick()
+        compose.onNodeWithContentDescription("更多").performClick()
+        compose.onNodeWithText("收起阅读操作").performClick()
+        compose.onNodeWithTag("post-quick-actions").assertDoesNotExist()
+        compose.onNodeWithContentDescription("更多").performClick()
+        compose.onNodeWithText("显示阅读操作").performClick()
+        compose.onNodeWithTag("post-quick-actions").assertIsDisplayed()
         compose.runOnUiThread {
             saveNativeScreenshot(compose.activity, "primary-post-320-light-normal.png")
         }
@@ -404,14 +445,14 @@ class PrimaryScreensRenderTest {
         every { vm.favoriteError } returns MutableStateFlow<String?>(null)
         render { nav -> PostScreen(nav, vm, dark = false) }
         compose.onNodeWithText(post.content).assertIsDisplayed()
-        compose.onNodeWithText("回复 2").performClick()
+        compose.onNodeWithText("回复 1").performClick()
         val authorAction = compose.onNodeWithContentDescription("只看楼主")
             .assertIsDisplayed().getUnclippedBoundsInRoot()
-        val pageAction = compose.onNodeWithContentDescription("翻页，当前第 1 页，共 2 页")
+        val jumpAction = compose.onNodeWithContentDescription("跳转楼层")
             .assertIsDisplayed().getUnclippedBoundsInRoot()
-        val replyAction = compose.onNodeWithText("回复").assertIsDisplayed().getUnclippedBoundsInRoot()
+        val replyAction = compose.onNodeWithText("写回复").assertIsDisplayed().getUnclippedBoundsInRoot()
         check(authorAction.right - authorAction.left >= 48.dp)
-        check(pageAction.right - pageAction.left >= 48.dp)
+        check(jumpAction.right - jumpAction.left >= 48.dp)
         val dock = compose.onNodeWithTag("post-quick-actions").getUnclippedBoundsInRoot()
         check(dock.left > 0.dp && dock.right < 780.dp) { "Reading actions must fit the reader width" }
         compose.runOnUiThread {
@@ -457,10 +498,10 @@ class PrimaryScreensRenderTest {
         every { vm.replySucceeded } returns MutableStateFlow(false)
         every { vm.favoriteError } returns MutableStateFlow<String?>(null)
         render(themeMode = "dark", fontScale = 2f) { nav -> PostScreen(nav, vm, dark = true) }
-        compose.onNodeWithText("回复 2").performClick()
+        compose.onNodeWithText("回复 1").performClick()
         compose.onNodeWithContentDescription("只看楼主").assertIsDisplayed()
-        compose.onNodeWithContentDescription("翻页，当前第 1 页，共 1 页").assertIsDisplayed()
-        compose.onNodeWithContentDescription("回复").assertIsDisplayed()
+        compose.onNodeWithContentDescription("跳转楼层").assertIsDisplayed()
+        compose.onNodeWithText("写回复").assertIsDisplayed()
         val shownDockTop = compose.onNodeWithTag("post-quick-actions").getUnclippedBoundsInRoot().top
         compose.runOnUiThread {
             saveNativeScreenshot(compose.activity, "primary-post-320x320-dark-2x.png")
@@ -582,11 +623,11 @@ class PrimaryScreensRenderTest {
         }
         compose.onNodeWithText(post.content).assertIsDisplayed()
         compose.onNodeWithText("查看相关讨论").assertIsDisplayed()
-        compose.onNodeWithText("回复 3").assertIsDisplayed()
+        compose.onNodeWithText("回复 2").assertIsDisplayed()
         compose.runOnUiThread {
             saveNativeScreenshot(compose.activity, "v8-reader-medium-608x860-native.png")
         }
-        compose.onNodeWithText("回复 3").performClick()
+        compose.onNodeWithText("回复 2").performClick()
         compose.onNodeWithContentDescription("0楼操作").performClick()
         compose.mainClock.advanceTimeBy(8_000)
         compose.onNodeWithContentDescription("收藏").assertIsDisplayed()
@@ -613,7 +654,7 @@ class PrimaryScreensRenderTest {
         compose.onNodeWithTag("post-reading-list").performScrollToIndex(0)
         compose.onNodeWithText("查看相关讨论").assertIsDisplayed()
         compose.onAllNodes(hasContentDescription("轻触空白，显示阅读操作"))[0].performClick()
-        compose.onNodeWithText("回复 3").assertIsDisplayed()
+        compose.onNodeWithText("回复 2").assertIsDisplayed()
     }
 
     private fun render(

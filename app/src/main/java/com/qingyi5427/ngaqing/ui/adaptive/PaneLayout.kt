@@ -1,6 +1,5 @@
 package com.qingyi5427.ngaqing.ui.adaptive
 
-import kotlin.math.min
 
 /** Coordinates are dp relative to the app's current window, never physical screen size. */
 data class FoldBounds(val left: Float, val top: Float, val right: Float, val bottom: Float)
@@ -26,9 +25,20 @@ data class PaneLayout(
 }
 
 /** Keep one continuous navigation stack while changing only the space allocated to its content. */
-fun calculatePaneLayout(width: Float, height: Float, fold: FoldGeometry?): PaneLayout {
+fun calculatePaneLayout(
+    width: Float,
+    height: Float,
+    fold: FoldGeometry?,
+    fontScale: Float = 1f,
+    preferredListWidth: Float = 300f,
+    contentHeight: Float = height,
+    contentWidth: Float = width
+): PaneLayout {
     val safeWidth = width.coerceAtLeast(0f)
     val safeHeight = height.coerceAtLeast(0f)
+    val horizontalInset = (safeWidth - contentWidth).coerceAtLeast(0f)
+    val canSplit = contentWidth >= 840f && contentHeight >= 480f &&
+        (fontScale < 1.3f || contentWidth >= 1000f)
     val horizontalFold = fold?.takeIf {
         it.separating && !it.vertical &&
             it.bounds.top < safeHeight && it.bounds.bottom > 0f &&
@@ -60,7 +70,8 @@ fun calculatePaneLayout(width: Float, height: Float, fold: FoldGeometry?): PaneL
         val useLeft = left >= safeWidth - right
         val singleLeft = if (useLeft) 0f else right + 8f
         val singleWidth = if (useLeft) leftWidth.coerceAtLeast(0f) else rightWidth.coerceAtLeast(0f)
-        if (safeWidth >= 840f && leftWidth >= 280f && rightWidth >= 360f) {
+        if (canSplit && leftWidth >= 250f + horizontalInset / 2f &&
+            rightWidth >= 460f + horizontalInset / 2f) {
             return PaneLayout(
                 0f, 0f, safeWidth, safeHeight,
                 leftWidth, safeWidth - leftWidth - rightWidth, rightWidth,
@@ -71,10 +82,11 @@ fun calculatePaneLayout(width: Float, height: Float, fold: FoldGeometry?): PaneL
         return PaneLayout(singleLeft, 0f, singleWidth, safeHeight, 0f, 0f, singleWidth, 0f, singleWidth)
     }
 
-    if (safeWidth < 840f) {
+    if (!canSplit) {
         return PaneLayout(0f, 0f, safeWidth, safeHeight, 0f, 0f, safeWidth, 0f, safeWidth)
     }
 
-    val listWidth = min(360f, safeWidth * 0.38f)
+    val listWidth = preferredListWidth.coerceIn(250f, 370f)
+        .coerceAtMost(contentWidth - 461f)
     return PaneLayout(0f, 0f, safeWidth, safeHeight, listWidth, 1f, safeWidth - listWidth - 1f, 0f, safeWidth)
 }

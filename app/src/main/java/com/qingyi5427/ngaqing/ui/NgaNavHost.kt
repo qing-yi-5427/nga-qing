@@ -20,21 +20,32 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.key
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -46,7 +57,17 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.rememberDrawerState
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
@@ -62,6 +83,9 @@ import com.qingyi5427.ngaqing.ui.adaptive.PaneLayout
 import com.qingyi5427.ngaqing.ui.adaptive.FoldBounds
 import com.qingyi5427.ngaqing.ui.adaptive.FoldGeometry
 import com.qingyi5427.ngaqing.ui.adaptive.calculatePaneLayout
+import com.qingyi5427.ngaqing.ui.adaptive.decideV8LayoutPolicy
+import com.qingyi5427.ngaqing.ui.adaptive.LocalV8LayoutPolicy
+import com.qingyi5427.ngaqing.ui.discover.DiscoverScreen
 import com.qingyi5427.ngaqing.ui.login.LoginScreen
 import com.qingyi5427.ngaqing.ui.favorites.FavoritesScreen
 import com.qingyi5427.ngaqing.ui.post.PostScreen
@@ -71,6 +95,8 @@ import com.qingyi5427.ngaqing.ui.search.SearchScreen
 import com.qingyi5427.ngaqing.ui.settings.SettingsScreen
 import com.qingyi5427.ngaqing.ui.history.HistoryScreen
 import com.qingyi5427.ngaqing.ui.thread.ThreadListScreen
+import com.qingyi5427.ngaqing.ui.thread.ThreadListViewModel
+import com.qingyi5427.ngaqing.data.model.Board
 import com.qingyi5427.ngaqing.ui.compose.NewTopicScreen
 import com.qingyi5427.ngaqing.ui.community.CommunityScreen
 import com.qingyi5427.ngaqing.ui.user.UserScreen
@@ -78,11 +104,13 @@ import com.qingyi5427.ngaqing.ui.web.WebEditorScreen
 import com.qingyi5427.ngaqing.ui.theme.NgaQingTheme
 import com.qingyi5427.ngaqing.ui.chrome.AppNavigationRail
 import com.qingyi5427.ngaqing.ui.chrome.LocalRootNavigationRail
+import com.qingyi5427.ngaqing.ui.chrome.openRootTab
 import com.qingyi5427.ngaqing.ui.chrome.RootNavigationRailWidth
 import androidx.window.layout.FoldingFeature
 import androidx.window.layout.WindowInfoTracker
 import androidx.core.view.WindowCompat
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlin.math.min
 
 // Compose tweens honor the platform MotionDurationScale; reduced motion (scale 0) snaps.
@@ -143,7 +171,7 @@ fun NgaNavHost(
     val readingLineSpacing by root.readingLineSpacing.collectAsStateWithLifecycle()
     val showSignatures by root.showSignatures.collectAsStateWithLifecycle()
     val startDestination = if (!authSession?.uid.isNullOrBlank() && !authSession?.cid.isNullOrBlank()) {
-        Routes.BOARDS
+        Routes.DISCOVER
     } else Routes.LOGIN
     val activity = LocalContext.current as Activity
     val windowLayoutFlow = remember(activity) {
@@ -164,6 +192,8 @@ fun NgaNavHost(
     // Keying the tree replaces the controller; clear old entries so their ViewModelStores close.
     key(authSession?.uid, authSession?.cid, authSession?.revision) {
     val nav = rememberNavController()
+    var readerFocusMode by rememberSaveable { mutableStateOf(false) }
+    var readerPaneWidth by rememberSaveable { mutableFloatStateOf(300f) }
     LaunchedEffect(nav) {
         previousNav?.takeIf { it !== nav }?.let { old ->
             runCatching { old.graph }.getOrNull()?.let { graph ->
@@ -204,6 +234,14 @@ fun NgaNavHost(
             ) {
                 val windowWidth = maxWidth.value
                 val windowHeight = maxHeight.value
+                val safeTop = with(density) { WindowInsets.safeDrawing.getTop(density).toDp().value }
+                val safeBottom = with(density) { WindowInsets.safeDrawing.getBottom(density).toDp().value }
+                val safeLeft = with(density) { WindowInsets.safeDrawing.getLeft(density,
+                    LocalLayoutDirection.current).toDp().value }
+                val safeRight = with(density) { WindowInsets.safeDrawing.getRight(density,
+                    LocalLayoutDirection.current).toDp().value }
+                val contentHeight = (windowHeight - safeTop - safeBottom).coerceAtLeast(0f)
+                val contentWidth = (windowWidth - safeLeft - safeRight).coerceAtLeast(0f)
                 val fold = windowFeatures.filterIsInstance<FoldingFeature>()
                     .firstOrNull {
                         it.isSeparating || it.occlusionType == FoldingFeature.OcclusionType.FULL
@@ -222,7 +260,11 @@ fun NgaNavHost(
                             )
                         }
                     }
-                val panes = calculatePaneLayout(windowWidth, windowHeight, fold)
+                val panes = calculatePaneLayout(windowWidth, windowHeight, fold,
+                    fontScale = density.fontScale, contentHeight = contentHeight,
+                    contentWidth = contentWidth)
+                val policy = decideV8LayoutPolicy(windowWidth, windowHeight,
+                    density.fontScale, fold, contentHeight, contentWidth)
                 val shortDistancePx = with(density) { 32.dp.roundToPx() }
                 val hasHinge = fold?.vertical == true
                 Box(Modifier.fillMaxSize()) {
@@ -233,6 +275,7 @@ fun NgaNavHost(
                             .height(panes.viewportHeight.dp)
                             .clipToBounds()
                     ) {
+                        CompositionLocalProvider(LocalV8LayoutPolicy provides policy) {
                         NavHost(
                             navController = nav,
                             startDestination = startDestination,
@@ -244,6 +287,10 @@ fun NgaNavHost(
                         ) {
                         composable(Routes.LOGIN) { SinglePane(panes) { LoginScreen(nav) } }
                         composable(Routes.ADD_ACCOUNT) { SinglePane(panes) { LoginScreen(nav, addingAccount = true) } }
+
+                        composable(Routes.DISCOVER) {
+                            RootPane(panes, nav, Routes.DISCOVER) { DiscoverScreen(nav) }
+                        }
 
                         composable(Routes.BOARDS) {
                             RootPane(panes, nav, Routes.BOARDS) { BoardScreen(nav) }
@@ -264,8 +311,13 @@ fun NgaNavHost(
                             val boardEntry = remember(backStack) {
                                 nav.previousBackStackEntry?.takeIf { it.destination.route == Routes.BOARDS }
                             }
-                            val contentPanes = railAdjustedPaneLayout(panes, effectiveRootRailWidth().value)
-                            val showDual = contentPanes.isTwoPane && boardEntry != null
+                            val contentPanes = if (panes.isTwoPane && panes.gutterWidth <= 1f) {
+                                val width = readerPaneWidth.coerceIn(250f,
+                                    minOf(370f, panes.viewportWidth - 461f))
+                                panes.copy(listWidth = width,
+                                    detailWidth = panes.viewportWidth - width - panes.gutterWidth)
+                            } else panes
+                            val showDual = contentPanes.isTwoPane
                             val openBoard: (com.qingyi5427.ngaqing.data.model.Board) -> Unit = { board ->
                                 if (showDual) {
                                     nav.navigate(Routes.threadRoute(board.fid, board.name, board.stid)) {
@@ -275,29 +327,44 @@ fun NgaNavHost(
                                     nav.navigate(Routes.threadRoute(board.fid, board.name, board.stid))
                                 }
                             }
-                            ReadingPane(panes, nav, Routes.THREADS) { readingPanes ->
-                              Row(Modifier.fillMaxSize()) {
-                                boardEntry?.takeIf { showDual }?.let { sourceEntry ->
-                                    Box(Modifier.width(readingPanes.listWidth.dp).fillMaxHeight()) {
-                                        BoardScreen(
-                                            nav,
-                                            viewModel = hiltViewModel(sourceEntry),
-                                            showBottomBar = false,
-                                            selectedBoardKey = boardIdentityKey(
-                                                backStack.arguments?.getString("fid").orEmpty(),
-                                                backStack.arguments?.getString("stid")
-                                            ),
-                                            onOpenBoard = openBoard
-                                        )
+                            val drawerState = rememberDrawerState(DrawerValue.Closed)
+                            val drawerScope = rememberCoroutineScope()
+                            ModalNavigationDrawer(
+                                drawerState = drawerState,
+                                gesturesEnabled = drawerState.isOpen,
+                                drawerContent = {
+                                    ModalDrawerSheet(Modifier.widthIn(max = 340.dp)
+                                        .fillMaxWidth().fillMaxHeight()) {
+                                        Row(Modifier.fillMaxWidth().padding(8.dp),
+                                            horizontalArrangement = Arrangement.SpaceEvenly) {
+                                            listOf(
+                                                Routes.DISCOVER to "发现", Routes.BOARDS to "版块",
+                                                Routes.FAVORITES to "收藏", Routes.PROFILE to "我的"
+                                            ).forEach { (route, label) ->
+                                                TextButton(onClick = {
+                                                    drawerScope.launch { drawerState.close() }
+                                                    nav.openRootTab(route)
+                                                }, modifier = Modifier.heightIn(min = 48.dp)) { Text(label) }
+                                            }
+                                        }
+                                        if (drawerState.isOpen) {
+                                            BoardScreen(nav,
+                                                viewModel = hiltViewModel(boardEntry ?: backStack),
+                                                showBottomBar = false,
+                                                onOpenBoard = { board ->
+                                                    drawerScope.launch { drawerState.close() }
+                                                    openBoard(board)
+                                                })
+                                        }
                                     }
-                                    Spacer(Modifier.width(readingPanes.gutterWidth.dp))
                                 }
-                                Box(Modifier.weight(1f).fillMaxHeight()) {
-                                    PaneContent(readingPanes, safeSingle = !showDual) {
-                                        ThreadListScreen(nav, onOpenBoard = openBoard)
-                                    }
-                                }
-                              }
+                            ) {
+                            val threadListVm: ThreadListViewModel = hiltViewModel(backStack)
+                            ReadingPane(contentPanes, nav, Routes.THREADS) { readingPanes ->
+                                ThreadRouteContent(readingPanes, nav, root, threadListVm,
+                                    onOpenBoard = openBoard,
+                                    onShowBoards = { drawerScope.launch { drawerState.open() } })
+                            }
                             }
                         }
 
@@ -309,37 +376,82 @@ fun NgaNavHost(
                             val threadEntry = remember(backStack) {
                                 nav.previousBackStackEntry?.takeIf { it.destination.route == Routes.THREADS }
                             }
-                            val contentPanes = railAdjustedPaneLayout(panes, effectiveRootRailWidth().value)
-                            val showDual = contentPanes.isTwoPane && threadEntry != null
-                            ReadingPane(panes, nav, Routes.POSTS) { readingPanes ->
-                              Row(Modifier.fillMaxSize()) {
-                                threadEntry?.takeIf { showDual }?.let { sourceEntry ->
-                                    Box(Modifier.width(readingPanes.listWidth.dp).fillMaxHeight()) {
-                                        ThreadListScreen(
-                                            nav = nav,
-                                            viewModel = hiltViewModel(sourceEntry),
-                                            root = root,
-                                            selectedTid = tid,
-                                            onOpenPost = { selected ->
-                                                if (selected != tid) {
-                                                    nav.navigate(Routes.postRoute(selected)) {
-                                                        popUpTo(Routes.POSTS) { inclusive = true }
-                                                    }
-                                                }
-                                            },
-                                            onOpenBoard = { board ->
-                                                nav.navigate(Routes.threadRoute(board.fid, board.name, board.stid)) {
-                                                    popUpTo(Routes.THREADS) { inclusive = true }
-                                                }
+                            val contentPanes = if (panes.isTwoPane && panes.gutterWidth <= 1f) {
+                                val width = readerPaneWidth.coerceIn(250f,
+                                    minOf(370f, panes.viewportWidth - 461f))
+                                panes.copy(listWidth = width,
+                                    detailWidth = panes.viewportWidth - width - panes.gutterWidth)
+                            } else panes
+                            val postLayout = resolvePostRouteLayout(contentPanes,
+                                hasThreadSource = threadEntry != null, focusMode = readerFocusMode)
+                            val canFocus = postLayout.canFocus
+                            val showDual = postLayout.showDual
+                            val drawerState = rememberDrawerState(DrawerValue.Closed)
+                            val drawerScope = rememberCoroutineScope()
+                            ModalNavigationDrawer(
+                                drawerState = drawerState,
+                                gesturesEnabled = drawerState.isOpen,
+                                drawerContent = {
+                                    ModalDrawerSheet(Modifier.widthIn(max = 340.dp)
+                                        .fillMaxWidth().fillMaxHeight()) {
+                                        Row(Modifier.fillMaxWidth().padding(8.dp),
+                                            horizontalArrangement = Arrangement.SpaceEvenly) {
+                                            listOf(
+                                                Routes.DISCOVER to "发现", Routes.BOARDS to "版块",
+                                                Routes.FAVORITES to "收藏", Routes.PROFILE to "我的"
+                                            ).forEach { (route, label) ->
+                                                TextButton(onClick = {
+                                                    drawerScope.launch { drawerState.close() }
+                                                    nav.openRootTab(route)
+                                                }, modifier = Modifier.heightIn(min = 48.dp)) { Text(label) }
                                             }
-                                        )
+                                        }
+                                        if (drawerState.isOpen) {
+                                            BoardScreen(nav, viewModel = hiltViewModel(backStack),
+                                                showBottomBar = false,
+                                                onOpenBoard = { board ->
+                                                    drawerScope.launch { drawerState.close() }
+                                                    nav.navigate(Routes.threadRoute(board.fid, board.name, board.stid))
+                                                })
+                                        }
                                     }
-                                    Spacer(Modifier.width(readingPanes.gutterWidth.dp))
                                 }
-                                Box(Modifier.weight(1f).fillMaxHeight()) {
-                                    PaneContent(readingPanes, safeSingle = !showDual) { PostScreen(nav, dark = dark) }
-                                }
-                              }
+                            ) {
+                            ReadingPane(contentPanes, nav, Routes.POSTS) { readingPanes ->
+                                PostRouteContent(readingPanes, postLayout,
+                                    readerPaneWidth = readerPaneWidth,
+                                    onReaderPaneWidthChange = { readerPaneWidth = it },
+                                    threadList = {
+                                        threadEntry?.let { sourceEntry ->
+                                            ThreadListScreen(
+                                                nav = nav,
+                                                viewModel = hiltViewModel(sourceEntry),
+                                                root = root,
+                                                selectedTid = tid,
+                                                onOpenPost = { selected ->
+                                                    if (selected != tid) {
+                                                        nav.navigate(Routes.postRoute(selected)) {
+                                                            popUpTo(Routes.POSTS) { inclusive = true }
+                                                        }
+                                                    }
+                                                },
+                                                onOpenBoard = { board ->
+                                                    nav.navigate(Routes.threadRoute(board.fid, board.name, board.stid)) {
+                                                        popUpTo(Routes.THREADS) { inclusive = true }
+                                                    }
+                                                },
+                                                onShowBoards = { drawerScope.launch { drawerState.open() } }
+                                            )
+                                        }
+                                    },
+                                    post = {
+                                        PostScreen(nav, dark = dark, root = root,
+                                            isFocusMode = canFocus && readerFocusMode,
+                                            onToggleFocus = if (canFocus) ({ readerFocusMode = !readerFocusMode }) else null,
+                                            onShowBoards = { drawerScope.launch { drawerState.open() } },
+                                            boardName = threadEntry?.arguments?.getString("name"))
+                                    })
+                            }
                             }
                         }
 
@@ -408,6 +520,7 @@ fun NgaNavHost(
                             )
                         ) { SinglePane(panes) { WebEditorScreen(nav) } }
                     }
+                    }
                 }
             }
         }
@@ -462,20 +575,115 @@ internal fun ReadingPane(
     railInsets: WindowInsets = WindowInsets.safeDrawing,
     content: @Composable (PaneLayout) -> Unit
 ) {
-    val useRail = panes.isTwoPane && panes.gutterWidth <= 1f
-    if (!useRail) {
-        content(panes)
-        return
-    }
-    val railWidth = effectiveRootRailWidth(railInsets)
-    val readingPanes = railAdjustedPaneLayout(panes, railWidth.value)
-    CompositionLocalProvider(LocalRootNavigationRail provides true) {
+    // HTML V8 keeps exactly the content panes; navigation is available through
+    // the root masthead and the reader's temporary board drawer.
+    CompositionLocalProvider(LocalRootNavigationRail provides
+        (route == Routes.THREADS && panes.isTwoPane)) { content(panes) }
+}
+
+internal data class PostRouteLayout(val canFocus: Boolean, val showDual: Boolean)
+
+/** A direct post from favorites, history or a deep link has no list to restore. */
+internal fun resolvePostRouteLayout(
+    panes: PaneLayout,
+    hasThreadSource: Boolean,
+    focusMode: Boolean
+): PostRouteLayout {
+    val canFocus = panes.isTwoPane && hasThreadSource
+    return PostRouteLayout(canFocus = canFocus, showDual = canFocus && !focusMode)
+}
+
+/** The production post composition, shared with full-window visual regression tests. */
+@Composable
+internal fun PostRouteContent(
+    panes: PaneLayout,
+    layout: PostRouteLayout,
+    readerPaneWidth: Float,
+    onReaderPaneWidthChange: (Float) -> Unit,
+    threadList: @Composable () -> Unit,
+    post: @Composable () -> Unit
+) {
+    val density = LocalDensity.current
+    Box(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxSize()) {
-            AppNavigationRail(
-                nav, currentRoute = route, selectedRoute = Routes.BOARDS,
-                safeInsets = railInsets, railWidth = railWidth
-            )
-            Box(Modifier.weight(1f).fillMaxHeight()) { content(readingPanes) }
+            if (layout.showDual) {
+                Box(Modifier.width(panes.listWidth.dp).fillMaxHeight()) { threadList() }
+                Spacer(Modifier.width(panes.gutterWidth.dp).fillMaxHeight()
+                    .background(MaterialTheme.colorScheme.outlineVariant))
+            }
+            Box(Modifier.weight(1f).fillMaxHeight()) {
+                PaneContent(panes, safeSingle = !layout.showDual, maxContentWidth = 720.dp) {
+                    post()
+                }
+            }
+        }
+        if (layout.showDual && panes.gutterWidth <= 1f) {
+            val maxWidth = minOf(370f, panes.viewportWidth - 461f)
+            Box(Modifier.offset(x = (panes.listWidth - 12f).dp)
+                .width(24.dp).fillMaxHeight()
+                .semantics {
+                    contentDescription = "调整主题列表宽度"
+                    customActions = listOf(
+                        CustomAccessibilityAction("加宽主题列表") {
+                            onReaderPaneWidthChange((readerPaneWidth + 20f).coerceAtMost(maxWidth))
+                            true
+                        },
+                        CustomAccessibilityAction("缩窄主题列表") {
+                            onReaderPaneWidthChange((readerPaneWidth - 20f).coerceAtLeast(250f))
+                            true
+                        }
+                    )
+                }
+                .pointerInput(panes.viewportWidth) {
+                    detectDragGestures { change, drag ->
+                        onReaderPaneWidthChange((readerPaneWidth + drag.x / density.density)
+                            .coerceIn(250f, maxWidth))
+                        change.consume()
+                    }
+                }, contentAlignment = Alignment.Center) {
+                Box(Modifier.width(4.dp).height(48.dp)
+                    .background(MaterialTheme.colorScheme.outline,
+                        androidx.compose.foundation.shape.RoundedCornerShape(4.dp)))
+            }
+        }
+    }
+}
+
+/** One thread-list VM stays on the back stack as the article's left pane. */
+@Composable
+internal fun ThreadRouteContent(
+    panes: PaneLayout,
+    nav: NavHostController,
+    root: RootViewModel,
+    viewModel: ThreadListViewModel,
+    onOpenBoard: (Board) -> Unit,
+    onShowBoards: () -> Unit
+) {
+    if (panes.isTwoPane) {
+        Row(Modifier.fillMaxSize()) {
+            Box(Modifier.width(panes.listWidth.dp).fillMaxHeight()) {
+                ThreadListScreen(nav, viewModel = viewModel, root = root,
+                    onOpenBoard = onOpenBoard, onShowBoards = onShowBoards)
+            }
+            Spacer(Modifier.width(panes.gutterWidth.dp).fillMaxHeight()
+                .background(MaterialTheme.colorScheme.outlineVariant))
+            Box(Modifier.weight(1f).fillMaxHeight()
+                .background(MaterialTheme.colorScheme.surface)
+                .testTag("thread-empty-reader"), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("选择主题开始阅读", style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface)
+                    Text("从左侧主题列表选择一篇帖子",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp))
+                }
+            }
+        }
+    } else {
+        PaneContent(panes, safeSingle = true) {
+            ThreadListScreen(nav, viewModel = viewModel, root = root,
+                onOpenBoard = onOpenBoard, onShowBoards = onShowBoards)
         }
     }
 }
@@ -488,19 +696,40 @@ internal fun RootPane(
     railInsets: WindowInsets = WindowInsets.safeDrawing,
     content: @Composable () -> Unit
 ) {
-    // The one-pixel gutter identifies an uninterrupted wide viewport. A separating
-    // hinge keeps the established safe single pane, with compact bottom navigation.
-    val useRail = panes.isTwoPane && panes.gutterWidth <= 1f
-    if (!useRail) {
-        SinglePane(panes, content)
-        return
-    }
-    CompositionLocalProvider(LocalRootNavigationRail provides true) {
-        val railWidth = effectiveRootRailWidth(railInsets)
-        Row(Modifier.fillMaxSize()) {
-            AppNavigationRail(nav, route, safeInsets = railInsets, railWidth = railWidth)
-            Box(Modifier.weight(1f).fillMaxHeight().navigationBarsPadding()) { content() }
+    // Each root route owns one safe canvas; the masthead provides wide navigation.
+    Box(Modifier.fillMaxSize()) {
+        Box(Modifier.offset(x = panes.singlePaneLeft.dp)
+            .width(panes.singlePaneWidth.dp).fillMaxHeight()) {
+            RootContentPolicy(content = content)
         }
+    }
+}
+
+/** Root screens decide their own columns and type after rail/hinge space is allocated. */
+@Composable
+private fun RootContentPolicy(
+    railConsumesStartInset: Boolean = false,
+    content: @Composable () -> Unit
+) {
+    val parent = LocalV8LayoutPolicy.current
+    val density = LocalDensity.current
+    val direction = LocalLayoutDirection.current
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val endInset = if (railConsumesStartInset) with(density) {
+            WindowInsets.safeDrawing.getRight(density, direction).toDp().value
+        } else 0f
+        val inheritedWidth = parent.availableWidthDp.takeIf { it > 0f } ?: maxWidth.value
+        val inheritedHeight = parent.availableHeightDp.takeIf { it > 0f } ?: maxHeight.value
+        val contentWidth = minOf(inheritedWidth,
+            (maxWidth.value - endInset).coerceAtLeast(0f))
+        val contentHeight = minOf(inheritedHeight, maxHeight.value)
+        val rootPolicy = decideV8LayoutPolicy(contentWidth, contentHeight, density.fontScale)
+            .copy(readerTwoPane = parent.readerTwoPane)
+        CompositionLocalProvider(
+            LocalV8LayoutPolicy provides rootPolicy,
+            LocalRootNavigationRail provides
+                (rootPolicy.availableWidthDp >= 840f && !rootPolicy.compactHeight)
+        ) { content() }
     }
 }
 
@@ -508,6 +737,7 @@ internal fun RootPane(
 private fun PaneContent(
     panes: PaneLayout,
     safeSingle: Boolean,
+    maxContentWidth: androidx.compose.ui.unit.Dp = 760.dp,
     content: @Composable () -> Unit
 ) {
     Box(Modifier.fillMaxSize()) {
@@ -517,7 +747,7 @@ private fun PaneContent(
                 .fillMaxHeight(),
             contentAlignment = Alignment.TopCenter
         ) {
-            Box(Modifier.widthIn(max = 760.dp).fillMaxSize()) { content() }
+            Box(Modifier.widthIn(max = maxContentWidth).fillMaxSize()) { content() }
         }
     }
 }

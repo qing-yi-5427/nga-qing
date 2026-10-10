@@ -12,6 +12,7 @@
 - 阅读字号/行距/签名偏好及本机多账号切换
 - Android 系统返回和内容区右滑返回
 - 多个 NGA 论坛入口域名及网页登录兜底
+- V8 发现页、四入口导航、宽屏主题列表与正文双栏、专注阅读；按窗口可用空间和折痕调整布局
 
 主题、回复和收藏同步依赖 NGA 当前网页/API 行为；当站点写接口变更时，应用会保留草稿并显示错误，不会自动重复提交。账号凭证仅保存在 Android 应用私有目录，应用已禁用系统云备份。
 
@@ -20,13 +21,13 @@
 需要 JDK 21 和 Android SDK 35。在项目目录执行：
 
 ```shell
-./gradlew testDebugUnitTest lintDebug assembleRelease
+./gradlew testDebugUnitTest lintDebug assembleDebug
 ```
 
 Windows 可使用：
 
 ```powershell
-.\gradlew.bat testDebugUnitTest lintDebug assembleRelease
+.\gradlew.bat testDebugUnitTest lintDebug assembleDebug
 ```
 
 Android `applicationId` 为 `com.qingyi5427.ngaqing`。从旧版 `com.ngaclient.app` 迁移时，Android 会将其视为独立应用，不继承原有登录状态、收藏或浏览历史。

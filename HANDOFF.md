@@ -1,22 +1,22 @@
-# NGA 清漪 1.1.1 交接（2026-09-28）
+# NGA 清漪 V8 交接（2026-10-10）
 
-本文件供切换模型后直接继续当前工程，不需要调用 Codex `handoff_thread`（那是切换任务检出环境，本次只是交接上下文）。工程位于 `G:\AI\coding\10-nga\NgaClient`；分支 `feat/ui-design-system`，HEAD `916633a7ca6da0cc243aa81f2550cbf9eb4d790b`。自该提交后的 1.1.1 工作仍在工作树中，**未提交、未推送**，应保留所有现有修改和未跟踪文件。用户长期要求：所有代码修改与构建交给 **GPT-6 Sol high 子代理**执行，root 只审核；后续轮次沿用，除非用户改口。
+本轮代码位于隔离工作树 `G:\AI\coding\10-nga\NgaClient-ui-v8`、分支 `feat/ui-v8-adaptive`。原工作树 `G:\AI\coding\10-nga\NgaClient` 保留，不在本轮修改或合并。视觉基准是同级 `NGA_Qing_UI_V8_Agent_Kit/nga-qing-ios-v8-inner-portrait.html` 及其 PNG；实施映射见 `docs/ui-v8-audit.md`，设备与场景记录见 `docs/ui-v8-qa/validation.md`。
 
-## 当前实现
+## 已实现
 
-- `app/build.gradle.kts` 将版本设为 **1.1.1 / versionCode 4**。Release 仍用项目现有 Android Debug 证书签名，走 R8/资源收缩。
-- 版块目录 `BoardScreen.kt`：顶栏为“版块目录”，正文重复大标题及其 Lazy item 已移除；分类侧栏的首项索引从 1 改为 0，恢复位置与最后一项测试索引同步调整。窄屏列表、宽屏目录侧栏、嵌入阅读布局均保留。
-- 主题列表 `ThreadListScreen.kt`：顶栏显示当前版块名（清理 HTML），固定在安全区域；正文重复大版块名已移除。其下的“全部主题/精华区”和排序/发帖工具行仍随手势连续收放，点顶栏标题可恢复工具行并返回列表顶部；ViewModel 的 `headerHiddenFraction` 只作用于工具区。
-- 阅读页 `PostScreen.kt`：顶栏显示当前主题标题并单行省略，正文标题保留。窄屏版块、收藏、个人中心的底部浮岛及原生阅读页操作岛随用户上滑隐藏、下滑出现；短列表边界也可触发，宽屏侧轨保持原行为。
-- 收藏/历史将搜索移入顶栏并保留清除筛选；版块页只留顶栏搜索；搜索页明确全站或版内范围，其他重复装饰文案已精简。相关修改分布在 `BottomNav.kt`、`ScrollDockState.kt`、`BoardScreen.kt`、`FavoritesScreen.kt`、`HistoryScreen.kt`、`CommunityScreen.kt`、`SearchScreen.kt`。
-- 个人中心通过当前会话抓取公开昵称和头像；旧账号资料空白可刷新，读取失败保留已有展示并允许重试，账号 revision 变化后旧请求结果不得覆盖新账号。相关修改在 `UserPreferences.kt`、`NgaRepository.kt`、`RootViewModel.kt`、`ProfileScreen.kt`。新增/改动的测试与本地证据图也尚未提交。
+- 发现、版块、收藏、我的四个根入口；宽屏为顶部导航，紧凑窗口为底部浮动导航。全部原有子路由仍使用同一个 `NavController`，账号 revision 切换继续重建旧会话。
+- 可用窗口宽高、系统字号及折痕安全矩形决定布局。内屏竖屏单列舒适字号；宽屏发现两区、收藏双列、主题列表与阅读正文双栏；低高度/过大字号按实际可用空间收敛。
+- THREADS 宽屏是左主题列表加右空态；POSTS 复用原 THREADS back stack 的 ViewModel，左列表与右正文独立滚动，250–370dp 左栏可调。收藏、历史和深链直达 POSTS 时没有虚构的左栏，也不显示无效“恢复双栏”；版块目录仍可临时打开。
+- 原账户、收藏同步、阅读锚点、回复草稿、网页正文直渲染与安全返回路径保留。HTML 原型的在线数、阅读百分比等无真实来源字段没有填充假数据。
 
-## 构建与验证
+## 已完成验证
 
-- 最新签名包：[nga-qing-1.1.1.apk](app/build/outputs/apk/release/nga-qing-1.1.1.apk)；Gradle 标准输出：[nga-qing-release.apk](app/build/outputs/apk/release/nga-qing-release.apk)。包名 `com.qingyi5427.ngaqing`，两文件 SHA-256 均为 `43DDCB20C79E4CB92304667DF9627ED13391682FECA30CF0E182149B22686F1D`。`:app:assembleRelease` 成功，`apksigner verify` 确认 APK v2 签名。
-- **本次版块标题变更之后**：定向 Robolectric 测试 **7/7** 通过（`ContentScreensRenderTest` 的 5 个 Board 用例、`RootPaneRenderTest` 的 2 个宽屏嵌入用例）；验证了分类跳转、收藏区域、滚动恢复与宽屏侧轨。此前固定主题顶栏的定向测试为 **13/13**，阅读页标题相关定向测试为 **8/8**。
-- **较早的 1.1.1 功能基线**：完整 `:app:testDebugUnitTest` **156 项全部通过**，完整 `:app:lintDebug` **0 error / 34 warning**。这些全量检查发生在后续标题调整之前；本次没有重跑全量或完整 Lint。`git diff --check` 无空白错误。
-- 生产页面 Robolectric/NATIVE 截图：[版块手机](docs/ui-evidence/board-title-1.1.1-phone.png)、[版块宽屏](docs/ui-evidence/board-title-1.1.1-wide.png)、[主题工具栏隐藏但标题固定](docs/ui-evidence/thread-fixed-title-hidden-1.1.1.png)。截图由 `decorView.drawToBitmap()` 生成。
-- Windows 环境使用 JDK 21 `C:\Program Files\Eclipse Adoptium\jdk-21.0.12.8-hotspot` 与 Android SDK `C:\Users\qingy\AppData\Local\Android\Sdk`；Gradle 使用 `--no-parallel --max-workers=1`。
+冻结生产源码后的 `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug --no-parallel --max-workers=1` 成功：45 个 suite、191 项测试、0 失败/错误/跳过；Lint 0 error、35 warning。较旧基线为 34 warning；新增 1 项仅是 AndroidTest runner 1.5.0 可升级至 1.5.2 的版本提示，不涉及无障碍或代码正确性。此前 `:app:assembleDebugAndroidTest` 已成功；独立 Runner 的启动等待策略正在真机阶段调试，其后要重新构建测试 APK。
 
-本版未安装到手机，也未重新做真机手势或远端头像网络验收；没有执行 ADB、Git 提交或推送。当前无待实现任务。后续若用户提出体验修改或要求提交/推送，再按新指示继续，并先检查工作树。较长的设计与历史验证记录见 [UI_REDESIGN_REVIEW.md](UI_REDESIGN_REVIEW.md)。
+Debug 候选 `app/build/outputs/apk/debug/nga-qing-debug.apk` 为 `com.qingyi5427.ngaqing`、1.2.0 / versionCode 5，SHA-256 `A63A6DEC3974743479EA7E2EEEC601FE3C1A1911FF674937636C197C88029588`；签名证书 SHA-256 `3774e86da5188b94341d667ad7e4a871ad8cda74f81088fb8445654d6068e0d6` 与旧装包一致。QA 已用保留数据的覆盖安装；主程序冷启动、窗口焦点与界面节点初检正常，完整设备矩阵以 `docs/ui-v8-qa/validation.md` 后续记录为准。此 Debug 包不是最终 Release。
+
+Compose 原生截图在 `app/build/outputs/ui-evidence/`：`v8-discover-innerL-html-size.png`、`v8-thread-html-innerL-986x698.png`、`v8-posts-html-innerL-986x698.png`。前两者分别是发现双区与主题空态；POSTS 截图来自生产 `PostRouteContent` 和正式 `PostScreen` 参数，测试还验证专注阅读隐藏左栏及恢复。`ReaderStateTransitionRenderTest` 在同一生产双栏容器下覆盖 #5 楼、宽窄/专注切换与回复编辑选区。截图使用测试样本，不能当作真机 NGA 数据。
+
+## 接下来
+
+QA 独占 ADB：更新并运行只读 AndroidTest Runner，完成真实直板机与六种窗口预设的页面、返回、字号、夜间、离线和状态恢复检查；所有模拟尺寸明确标注为模拟，真实折叠机尚不可测。不发帖、回帖或私信，不卸载或清除数据。主代理审核设备结果后才构建正式 `nga-qing-1.2.0-v8.apk`、签名/散列复核及 Release 包保数据烟测。当前不合并、不推送、不发布 GitHub Release。

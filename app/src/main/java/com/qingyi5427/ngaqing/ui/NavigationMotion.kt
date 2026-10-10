@@ -39,8 +39,9 @@ internal fun isSharedListTransition(fromRoute: String?, toRoute: String?): Boole
         toRoute in setOf(Routes.THREADS, Routes.POSTS)
 
 private fun rootTabIndex(route: String?): Int? = when (route) {
-    Routes.BOARDS -> 0
-    Routes.FAVORITES -> 1
-    Routes.PROFILE -> 2
+    Routes.DISCOVER -> 0
+    Routes.BOARDS -> 1
+    Routes.FAVORITES -> 2
+    Routes.PROFILE -> 3
     else -> null
 }

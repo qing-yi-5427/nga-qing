@@ -36,6 +36,7 @@ import androidx.navigation.compose.rememberNavController
 import com.qingyi5427.ngaqing.data.local.NgaDomains
 import com.qingyi5427.ngaqing.data.local.AccountDisplay
 import com.qingyi5427.ngaqing.data.local.SavedAccount
+import com.qingyi5427.ngaqing.data.local.ReadingDockMode
 import com.qingyi5427.ngaqing.data.local.WatchedThreadEntity
 import com.qingyi5427.ngaqing.data.model.CommunityItem
 import com.qingyi5427.ngaqing.data.model.ThreadItem
@@ -293,6 +294,7 @@ class SecondaryScreensRenderTest {
             every { blacklistKeywords } returns MutableStateFlow<Set<String>>(emptySet())
             every { readingTextScale } returns MutableStateFlow(1f)
             every { readingLineSpacing } returns MutableStateFlow(1f)
+            every { readingDockMode } returns MutableStateFlow(ReadingDockMode.AUTO)
             every { showSignatures } returns MutableStateFlow(true)
             every { accounts } returns MutableStateFlow(
                 listOf(SavedAccount("123456", "cid", "测试用户"))

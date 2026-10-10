@@ -53,6 +53,8 @@ import com.qingyi5427.ngaqing.data.model.Board
 import com.qingyi5427.ngaqing.data.model.BoardGroup
 import com.qingyi5427.ngaqing.data.model.ThreadItem
 import com.qingyi5427.ngaqing.ui.Routes
+import com.qingyi5427.ngaqing.ui.RootPane
+import com.qingyi5427.ngaqing.ui.adaptive.calculatePaneLayout
 import com.qingyi5427.ngaqing.ui.board.BoardScreen
 import com.qingyi5427.ngaqing.ui.board.BoardUiState
 import com.qingyi5427.ngaqing.ui.board.BoardViewModel
@@ -157,6 +159,7 @@ class ContentScreensRenderTest {
     @Test fun favoriteDockHidesAtShortListBoundaryAndReappearsOnReverseSwipe() {
         val vm = mockk<FavoritesViewModel>(relaxed = true)
         every { vm.favorites } returns MutableStateFlow(listOf(FavoriteEntity("1", "收藏主题", "10", "作者")))
+        every { vm.visitedTids } returns MutableStateFlow(emptySet())
         every { vm.folders } returns MutableStateFlow<List<String>>(emptyList())
         every { vm.syncing } returns MutableStateFlow(false)
         every { vm.syncMessage } returns MutableStateFlow<String?>(null)
@@ -190,6 +193,7 @@ class ContentScreensRenderTest {
         val syncError = MutableStateFlow<String?>(null)
         val vm = mockk<FavoritesViewModel>(relaxed = true)
         every { vm.favorites } returns rows
+        every { vm.visitedTids } returns MutableStateFlow(emptySet())
         every { vm.folders } returns folders
         every { vm.syncing } returns MutableStateFlow(false)
         every { vm.syncMessage } returns MutableStateFlow<String?>(null)
@@ -198,9 +202,9 @@ class ContentScreensRenderTest {
         render(themeMode = "dark") { nav -> FavoritesScreen(nav, vm) }
         compose.onNodeWithText("收藏主题").assertIsDisplayed()
         compose.onNodeWithText("全部").assertIsDisplayed()
-        compose.onNodeWithContentDescription("搜索收藏").assertIsDisplayed()
+        compose.onNodeWithContentDescription("搜索、排序与同步收藏").assertIsDisplayed()
         compose.onNodeWithText("按分组整理你的收藏", substring = true).assertDoesNotExist()
-        compose.onNodeWithContentDescription("取消收藏 收藏主题").assertIsDisplayed()
+        compose.onNodeWithContentDescription("管理收藏 收藏主题").assertIsDisplayed()
         screenshot("favorites-phone-dark.png")
         compose.runOnUiThread { rows.value = emptyList() }
         compose.onNodeWithText("还没有收藏").assertIsDisplayed()
@@ -211,27 +215,138 @@ class ContentScreensRenderTest {
     }
 
     @Test
+    @Config(sdk = [33], qualifiers = "w608dp-h860dp")
+    fun favoritesMediumPortraitKeepsComfortableSingleColumn() {
+        val vm = mockk<FavoritesViewModel>(relaxed = true)
+        every { vm.favorites } returns MutableStateFlow(listOf(
+            FavoriteEntity("1", "折叠屏使用一周后，我终于理解了它真正的意义", "10", "晚风过境", folder = "数码硬件"),
+            FavoriteEntity("2", "这几个系统交互细节，真的用过就回不去了", "10", "失眠收音机", folder = "数码硬件"),
+            FavoriteEntity("3", "有多少人会长期使用阅读模式和护眼设置？", "10", "纸上星河", folder = "数码硬件")
+        ))
+        every { vm.visitedTids } returns MutableStateFlow(setOf("1"))
+        every { vm.folders } returns MutableStateFlow(listOf("数码硬件"))
+        every { vm.syncing } returns MutableStateFlow(false)
+        every { vm.syncMessage } returns MutableStateFlow<String?>(null)
+        every { vm.syncError } returns MutableStateFlow<String?>(null)
+        every { vm.actionError } returns MutableStateFlow<String?>(null)
+        render { nav ->
+            RootPane(calculatePaneLayout(608f, 860f, null), nav, Routes.FAVORITES) {
+                FavoritesScreen(nav, vm)
+            }
+        }
+        val first = compose.onNodeWithText("折叠屏使用一周后，我终于理解了它真正的意义")
+            .assertIsDisplayed().getUnclippedBoundsInRoot()
+        val second = compose.onNodeWithText("这几个系统交互细节，真的用过就回不去了")
+            .assertIsDisplayed().getUnclippedBoundsInRoot()
+        assertTrue("608dp 收藏应单列舒适卡片", first.bottom < second.top)
+        screenshot("v8-favorites-innerP.png")
+    }
+
+    @Test
+    @Config(sdk = [33], qualifiers = "w860dp-h608dp")
+    fun favoritesWideCanvasUsesTwoRealCards() {
+        val vm = mockk<FavoritesViewModel>(relaxed = true)
+        every { vm.favorites } returns MutableStateFlow(listOf(
+            FavoriteEntity("1", "折叠屏使用一周后，我终于理解了它真正的意义", "10", "晚风过境", folder = "数码硬件"),
+            FavoriteEntity("2", "这几个系统交互细节，真的用过就回不去了", "10", "失眠收音机", folder = "数码硬件"),
+            FavoriteEntity("3", "有多少人会长期使用阅读模式和护眼设置？", "10", "纸上星河", folder = "数码硬件"),
+            FavoriteEntity("4", "这周最让你惊喜的一款独立游戏是什么？", "11", "野原星子", folder = "游戏综合")
+        ))
+        every { vm.visitedTids } returns MutableStateFlow(setOf("1", "2"))
+        every { vm.folders } returns MutableStateFlow(listOf("数码硬件", "游戏综合"))
+        every { vm.syncing } returns MutableStateFlow(false)
+        every { vm.syncMessage } returns MutableStateFlow<String?>(null)
+        every { vm.syncError } returns MutableStateFlow<String?>(null)
+        every { vm.actionError } returns MutableStateFlow<String?>(null)
+        render { nav ->
+            RootPane(calculatePaneLayout(860f, 608f, null), nav, Routes.FAVORITES) {
+                FavoritesScreen(nav, vm)
+            }
+        }
+        val first = compose.onNodeWithText("折叠屏使用一周后，我终于理解了它真正的意义")
+            .assertIsDisplayed().getUnclippedBoundsInRoot()
+        val second = compose.onNodeWithText("这几个系统交互细节，真的用过就回不去了")
+            .assertIsDisplayed().getUnclippedBoundsInRoot()
+        assertTrue("860dp 收藏应左右双列", first.right < second.left)
+        screenshot("v8-favorites-860x608-two-columns.png")
+    }
+
+    @Test
+    @Config(sdk = [33], qualifiers = "w698dp-h986dp")
+    fun favoritesHtmlMediumReferenceCanvas() {
+        renderFavoritesHtmlReference(698f, 986f, "v8-favorites-innerP-html-size.png")
+        val first = compose.onNodeWithText("折叠屏使用一周后，我终于理解了它真正的意义")
+            .assertIsDisplayed().getUnclippedBoundsInRoot()
+        val second = compose.onNodeWithText("这几个系统交互细节，真的用过就回不去了")
+            .assertIsDisplayed().getUnclippedBoundsInRoot()
+        assertTrue(first.bottom < second.top)
+    }
+
+    @Test
+    @Config(sdk = [33], qualifiers = "w986dp-h698dp")
+    fun favoritesHtmlWideReferenceCanvas() {
+        renderFavoritesHtmlReference(986f, 698f, "v8-favorites-innerL-html-size.png")
+        val first = compose.onNodeWithText("折叠屏使用一周后，我终于理解了它真正的意义")
+            .assertIsDisplayed().getUnclippedBoundsInRoot()
+        val second = compose.onNodeWithText("这几个系统交互细节，真的用过就回不去了")
+            .assertIsDisplayed().getUnclippedBoundsInRoot()
+        assertTrue(first.right < second.left)
+    }
+
+    private fun renderFavoritesHtmlReference(width: Float, height: Float, filename: String) {
+        val vm = mockk<FavoritesViewModel>(relaxed = true)
+        every { vm.favorites } returns MutableStateFlow(listOf(
+            FavoriteEntity("1", "折叠屏使用一周后，我终于理解了它真正的意义", "10", "晚风过境", folder = "数码硬件"),
+            FavoriteEntity("2", "这几个系统交互细节，真的用过就回不去了", "10", "失眠收音机", folder = "数码硬件"),
+            FavoriteEntity("3", "有多少人会长期使用阅读模式和护眼设置？", "10", "纸上星河", folder = "数码硬件"),
+            FavoriteEntity("4", "这周最让你惊喜的一款独立游戏是什么？", "11", "野原星子", folder = "游戏综合"),
+            FavoriteEntity("5", "Compose 的折叠屏适配：不要把方向当成布局条件", "10", "白纸工程师", folder = "技术交流"),
+            FavoriteEntity("6", "桌面整理半年总结：Less is more", "10", "南岸的云", folder = "数码硬件"),
+            FavoriteEntity("7", "有哪些值得一听再听的游戏原声音乐？", "11", "云上漫步", folder = "游戏综合")
+        ))
+        every { vm.visitedTids } returns MutableStateFlow(setOf("1", "2", "4"))
+        every { vm.folders } returns MutableStateFlow(listOf("数码硬件", "游戏综合", "技术交流"))
+        every { vm.syncing } returns MutableStateFlow(false)
+        every { vm.syncMessage } returns MutableStateFlow<String?>(null)
+        every { vm.syncError } returns MutableStateFlow<String?>(null)
+        every { vm.actionError } returns MutableStateFlow<String?>(null)
+        render { nav ->
+            RootPane(calculatePaneLayout(width, height, null), nav, Routes.FAVORITES) {
+                FavoritesScreen(nav, vm)
+            }
+        }
+        screenshot(filename)
+    }
+
+    @Test
     @Config(sdk = [33], qualifiers = "w320dp-h568dp")
     fun favoritesLargeTextKeepsFolderAndDeleteActionsReachable() {
         val vm = mockk<FavoritesViewModel>(relaxed = true)
         every { vm.favorites } returns MutableStateFlow(listOf(
             FavoriteEntity("1", "收藏主题", "10", "作者", folder = "比较长的收藏分组名称")
         ))
+        every { vm.visitedTids } returns MutableStateFlow(emptySet())
         every { vm.folders } returns MutableStateFlow(listOf("其他"))
         every { vm.syncing } returns MutableStateFlow(false)
         every { vm.syncMessage } returns MutableStateFlow<String?>(null)
         every { vm.syncError } returns MutableStateFlow<String?>(null)
         every { vm.actionError } returns MutableStateFlow<String?>(null)
-        render(themeMode = "dark", fontScale = 2f) { nav -> FavoritesScreen(nav, vm) }
+        render(themeMode = "dark", fontScale = 2f) { nav ->
+            RootPane(calculatePaneLayout(320f, 568f, null, 2f), nav, Routes.FAVORITES) {
+                FavoritesScreen(nav, vm)
+            }
+        }
         // Bring the full row above the floating dock; the list remains scrollable beneath it.
-        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(2)
+        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
+        compose.onNode(hasScrollToIndexAction()).performTouchInput { swipeUp() }
         screenshot("favorites-320-dark-2x-row.png")
-        val folder = compose.onNodeWithText("比较长的收藏分组名称")
-        folder.assertIsDisplayed().performClick()
+        compose.onNodeWithText("比较长的收藏分组名称").assertIsDisplayed()
+        compose.onNodeWithContentDescription("管理收藏 收藏主题").performClick()
+        compose.onNodeWithText("移动到其他分组").performClick()
         compose.onNodeWithText("移动收藏").assertIsDisplayed()
         compose.onNodeWithText("取消").performClick()
-        val delete = compose.onNodeWithContentDescription("取消收藏 收藏主题").performScrollTo()
-        delete.assertIsDisplayed().performClick()
+        compose.onNodeWithContentDescription("管理收藏 收藏主题").performScrollTo().performClick()
+        compose.onNodeWithText("取消收藏").performClick()
         compose.onNodeWithText("取消收藏？").assertIsDisplayed()
     }
 
@@ -242,6 +357,7 @@ class ContentScreensRenderTest {
         val rows = MutableStateFlow(listOf(saved))
         val vm = mockk<FavoritesViewModel>(relaxed = true)
         every { vm.favorites } returns rows
+        every { vm.visitedTids } returns MutableStateFlow(emptySet())
         every { vm.folders } returns MutableStateFlow<List<String>>(emptyList())
         every { vm.syncing } returns MutableStateFlow(false)
         every { vm.syncMessage } returns MutableStateFlow<String?>(null)
@@ -254,7 +370,8 @@ class ContentScreensRenderTest {
                 composable(Routes.BOARDS) { Text("版块页目标") }
             }
         }
-        compose.onNodeWithContentDescription("搜索收藏").performClick()
+        compose.onNodeWithContentDescription("搜索、排序与同步收藏").performClick()
+        compose.onNodeWithText("搜索收藏").performClick()
         val search = compose.onAllNodes(hasSetTextAction()).onFirst()
         search.performTextInput("甲")
         search.assertIsFocused()
@@ -266,8 +383,10 @@ class ContentScreensRenderTest {
         search.performTextInput("丙")
         verify { vm.setQuery(match { it.contains("甲") && it.contains("乙") && it.contains("丙") }) }
         compose.onNodeWithText("完成").performClick()
-        compose.onNodeWithText("清除搜索：甲乙丙").assertIsDisplayed().performClick()
+        compose.onNodeWithContentDescription("搜索、排序与同步收藏").performClick()
+        compose.onNodeWithText("清除搜索与分组").performClick()
         verify { vm.setQuery("") }
+        screenshot("favorites-search-after-clear-v8.png")
         compose.onNodeWithText("我的").assertIsDisplayed().performClick()
         compose.onNodeWithText("个人页目标").assertIsDisplayed()
     }
