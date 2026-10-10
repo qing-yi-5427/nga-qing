@@ -5,5 +5,5 @@
         <path android:fillColor="#D4E8FF" android:pathData="M42,30 H66 Q78,30 78,42 V66 Q78,78 66,78 H53 L43,84 L41,78 Q30,77 30,66 V42 Q30,30 42,30 Z" />
     </group>
     <path android:fillColor="#087EFF" android:pathData="M42,30 H66 Q78,30 78,42 V66 Q78,78 66,78 H53 L43,84 L41,78 Q30,77 30,66 V42 Q30,30 42,30 Z" />
-    <path android:fillColor="#FFFFFF" android:pathData="M39,40 H46 L63,59 V40 H70 V68 H63 L46,49 V68 H39 Z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M38.5,40 H45.5 L62.5,59 V40 H69.5 V68 H62.5 L45.5,49 V68 H38.5 Z" />
 </vector>
