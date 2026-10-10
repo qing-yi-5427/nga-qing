@@ -14,15 +14,16 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.size
@@ -45,6 +46,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -61,6 +63,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -69,6 +72,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.contentDescription
@@ -78,6 +82,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -86,8 +91,10 @@ import coil.compose.AsyncImage
 import com.qingyi5427.ngaqing.data.model.Board
 import com.qingyi5427.ngaqing.data.model.BoardGroup
 import com.qingyi5427.ngaqing.ui.Routes
+import com.qingyi5427.ngaqing.ui.adaptive.LocalV8LayoutPolicy
+import com.qingyi5427.ngaqing.ui.adaptive.decideV8LayoutPolicy
 import com.qingyi5427.ngaqing.ui.chrome.AppBottomBar
-import com.qingyi5427.ngaqing.ui.chrome.AppTopBar
+import com.qingyi5427.ngaqing.ui.chrome.EditorialRootTopBar
 import com.qingyi5427.ngaqing.ui.chrome.LocalRootNavigationRail
 import com.qingyi5427.ngaqing.ui.chrome.rememberScrollDockState
 import com.qingyi5427.ngaqing.ui.design.NgaStatePanel
@@ -142,11 +149,12 @@ fun BoardScreen(
     ) {
     Column(Modifier.fillMaxSize()
         .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))) {
-        AppTopBar("版块目录") {
-            IconButton(onClick = { nav.navigate(Routes.searchRoute(null)) }) {
-                Icon(Icons.Filled.Search, contentDescription = "全站搜索")
-            }
-        }
+        if (showBottomBar) {
+            EditorialRootTopBar(nav, Routes.BOARDS, "版块目录",
+                Modifier.padding(horizontal = if (LocalV8LayoutPolicy.current.availableWidthDp >= 600f)
+                    34.dp else 20.dp))
+            BoardPageIntro { nav.navigate(Routes.searchRoute(null)) }
+        } else BoardCompactTopBar { nav.navigate(Routes.searchRoute(null)) }
         PullToRefreshBox(
             isRefreshing = isRefreshing,
             onRefresh = viewModel::refresh,
@@ -168,7 +176,8 @@ fun BoardScreen(
                     listState,
                     viewModel::reorderFavoriteBoards,
                     onOpenBoard,
-                    showBottomBar = hasDock
+                    showBottomBar = hasDock,
+                    rootScreen = showBottomBar
                 )
             }
         }
@@ -181,6 +190,58 @@ fun BoardScreen(
 }
 
 @Composable
+private fun BoardPageIntro(onSearch: () -> Unit) {
+    val comfortable = LocalV8LayoutPolicy.current.mediumComfortTypography
+    val margin = if (LocalV8LayoutPolicy.current.availableWidthDp >= 600f) 34.dp else 20.dp
+    Column(Modifier.fillMaxWidth().testTag("board-directory-root-header")
+        .padding(horizontal = margin)
+        .padding(top = if (comfortable) 14.dp else 11.dp, bottom = 16.dp)) {
+        Text("COMMUNITY  ·  NGA QING", fontSize = 11.sp, lineHeight = 15.sp,
+            fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(Modifier.padding(top = 7.dp, bottom = 5.dp), verticalAlignment = Alignment.Bottom) {
+            Text("版块", fontSize = if (comfortable) 40.sp else 35.sp,
+                lineHeight = if (comfortable) 46.sp else 42.sp,
+                fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onBackground)
+            Text(".", fontSize = if (comfortable) 40.sp else 35.sp,
+                lineHeight = if (comfortable) 46.sp else 42.sp,
+                fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
+        }
+        Text("按兴趣找到想看的讨论", fontSize = if (comfortable) 13.sp else 12.sp,
+            lineHeight = if (comfortable) 18.sp else 16.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(Modifier.fillMaxWidth().padding(top = 15.dp)
+            .heightIn(min = if (comfortable) 53.dp else 48.dp)
+            .clip(RoundedCornerShape(13.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .clickable(onClick = onSearch).testTag("board-directory-search")
+            .padding(horizontal = 15.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Icon(Icons.Filled.Search, contentDescription = null,
+                tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(19.dp))
+            Text("搜索帖子、版块与用户", fontSize = if (comfortable) 15.sp else 13.sp,
+                lineHeight = if (comfortable) 20.sp else 18.sp,
+                color = MaterialTheme.colorScheme.outline)
+        }
+    }
+}
+
+@Composable
+private fun BoardCompactTopBar(onSearch: () -> Unit) {
+    Row(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
+        .heightIn(min = 56.dp).padding(start = 16.dp, end = 8.dp)
+        .testTag("board-directory-compact-header"),
+        verticalAlignment = Alignment.CenterVertically) {
+        Text("版块目录", style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f),
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
+        IconButton(onClick = onSearch) {
+            Icon(Icons.Filled.Search, contentDescription = "全站搜索")
+        }
+    }
+}
+
+@Composable
 private fun BoardList(
     groups: List<BoardGroup>,
     favoriteBoards: List<Board>,
@@ -188,7 +249,8 @@ private fun BoardList(
     listState: LazyListState,
     onFavoriteOrderChanged: (List<Board>) -> Unit,
     onOpenBoard: (Board) -> Unit,
-    showBottomBar: Boolean
+    showBottomBar: Boolean,
+    rootScreen: Boolean
 ) {
     val categories = groups.groupBy { it.categoryName }
     val dockClearance = 96.dp + with(LocalDensity.current) {
@@ -249,6 +311,9 @@ private fun BoardList(
         }
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
+    val localPolicy = decideV8LayoutPolicy(maxWidth.value, maxHeight.value,
+        LocalDensity.current.fontScale)
+    CompositionLocalProvider(LocalV8LayoutPolicy provides localPolicy) {
     val wideDirectory = maxWidth >= 720.dp
     Row(Modifier.fillMaxSize()) {
     if (wideDirectory) {
@@ -261,7 +326,10 @@ private fun BoardList(
     LazyColumn(
         modifier = Modifier.weight(1f).fillMaxHeight(),
         state = listState,
-        contentPadding = PaddingValues(bottom = if (showBottomBar) dockClearance else 24.dp)
+        contentPadding = PaddingValues(
+            start = if (rootScreen) if (wideDirectory) 34.dp else 20.dp else 10.dp,
+            end = if (rootScreen) if (wideDirectory) 34.dp else 20.dp else 10.dp,
+            bottom = if (showBottomBar) dockClearance else 24.dp)
     ) {
         if (orderedFavoriteBoards.value.isNotEmpty()) {
             val favoritesKey = "favorite-boards"
@@ -284,6 +352,7 @@ private fun BoardList(
                     BoardRow(
                         board = board,
                         isChild = false,
+                        bottomRounded = orderIndex == orderedFavoriteBoards.value.lastIndex,
                         selected = boardKey == selectedBoardKey,
                         showDragHandle = true,
                         accessibilityActions = buildList {
@@ -396,6 +465,7 @@ private fun BoardList(
                         BoardRow(
                             board = parent,
                             isChild = false,
+                            bottomRounded = !groupExpanded || group.children.isEmpty(),
                             selected = favoriteBoardKey(parent) == selectedBoardKey,
                             expanded = groupExpanded,
                             onToggle = { collapsed = collapsed.toggle(groupKey) },
@@ -404,7 +474,8 @@ private fun BoardList(
                     }
                 } else if (group.groupName != categoryName) {
                     item(key = groupKey, contentType = "group-header") {
-                        GroupHeader(group.groupName, groupExpanded) {
+                        GroupHeader(group.groupName, groupExpanded,
+                            bottomRounded = !groupExpanded || group.children.isEmpty()) {
                             collapsed = collapsed.toggle(groupKey)
                         }
                     }
@@ -415,6 +486,7 @@ private fun BoardList(
                         BoardRow(
                             board,
                             isChild = parent != null,
+                            bottomRounded = boardIndex == group.children.lastIndex,
                             selected = favoriteBoardKey(board) == selectedBoardKey
                         ) {
                             onOpenBoard(board)
@@ -438,6 +510,7 @@ private fun BoardList(
     }
     }
     }
+    }
 }
 
 private data class BoardDirectorySection(
@@ -455,11 +528,12 @@ private fun BoardDirectoryRail(
 ) {
     Column(
         Modifier.width(220.dp).fillMaxHeight()
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .background(MaterialTheme.colorScheme.surface)
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 24.dp)
+            .padding(horizontal = 18.dp, vertical = 20.dp)
     ) {
-        Text("目录概览", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text("目录概览", style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(16.dp))
         sections.forEach { section ->
             val active = section.key == activeKey
@@ -497,8 +571,11 @@ private fun CategoryHeader(
     detail: String? = null,
     onToggle: () -> Unit
 ) {
-    Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    val comfortable = LocalV8LayoutPolicy.current.mediumComfortTypography
+    Column(Modifier.fillMaxWidth().padding(top = 12.dp)
+        .clip(if (expanded) RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
+            else RoundedCornerShape(16.dp))
+        .background(MaterialTheme.colorScheme.surface)) {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 56.dp)
                 .padding(start = 24.dp, end = 10.dp),
@@ -506,7 +583,8 @@ private fun CategoryHeader(
         ) {
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(name, style = MaterialTheme.typography.titleMedium,
+                    Text(name, fontSize = if (comfortable) 20.sp else 18.sp,
+                        lineHeight = if (comfortable) 28.sp else 25.sp,
                         fontWeight = FontWeight.SemiBold, maxLines = 2,
                         overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                     Text("$count", style = MaterialTheme.typography.labelMedium,
@@ -518,20 +596,28 @@ private fun CategoryHeader(
             }
             CollapseButton(expanded, onToggle, name)
         }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant,
+            modifier = Modifier.padding(horizontal = 16.dp))
     }
 }
 
 @Composable
-private fun GroupHeader(name: String, expanded: Boolean, onToggle: () -> Unit) {
+private fun GroupHeader(name: String, expanded: Boolean, bottomRounded: Boolean,
+    onToggle: () -> Unit) {
+    val comfortable = LocalV8LayoutPolicy.current.mediumComfortTypography
     Row(
         modifier = Modifier.fillMaxWidth()
+            .clip(if (bottomRounded) RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)
+                else RoundedCornerShape(0.dp))
+            .background(MaterialTheme.colorScheme.surface)
             .heightIn(min = 48.dp)
             .padding(start = 24.dp, end = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text = name,
-            style = MaterialTheme.typography.titleSmall,
+            fontSize = if (comfortable) 15.sp else 14.sp,
+            lineHeight = if (comfortable) 22.sp else 20.sp,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.weight(1f)
         )
@@ -543,6 +629,7 @@ private fun GroupHeader(name: String, expanded: Boolean, onToggle: () -> Unit) {
 private fun BoardRow(
     board: Board,
     isChild: Boolean,
+    bottomRounded: Boolean = false,
     selected: Boolean = false,
     expanded: Boolean? = null,
     onToggle: (() -> Unit)? = null,
@@ -552,11 +639,18 @@ private fun BoardRow(
     onClick: () -> Unit
 ) {
     val colorScheme = MaterialTheme.colorScheme
+    val comfortable = LocalV8LayoutPolicy.current.mediumComfortTypography
     Row(
         modifier.fillMaxWidth()
+            .clip(if (bottomRounded) RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)
+                else RoundedCornerShape(0.dp))
             .background(if (selected) colorScheme.primaryContainer else colorScheme.surface)
             .drawBehind {
                 if (selected) drawRect(colorScheme.primary, size = Size(3.dp.toPx(), size.height))
+                if (!bottomRounded) drawLine(colorScheme.outlineVariant,
+                    start = Offset(16.dp.toPx(), size.height - 0.5.dp.toPx()),
+                    end = Offset(size.width - 16.dp.toPx(), size.height - 0.5.dp.toPx()),
+                    strokeWidth = 1.dp.toPx())
             }
             .semantics {
                 this.selected = selected
@@ -564,17 +658,21 @@ private fun BoardRow(
             }
             .clickable(onClick = onClick)
             .heightIn(min = 64.dp)
-            .padding(start = if (isChild) 38.dp else 24.dp, end = 20.dp, top = 8.dp, bottom = 8.dp),
+            .padding(start = if (LocalV8LayoutPolicy.current.availableWidthDp < 360f)
+                if (isChild) 18.dp else 12.dp else if (isChild) 34.dp else 20.dp,
+                end = if (LocalV8LayoutPolicy.current.availableWidthDp < 360f) 8.dp else 14.dp,
+                top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        BoardIcon(board, if (isChild) 34.dp else 42.dp)
-        Column(Modifier.weight(1f).padding(start = 14.dp, end = 10.dp)) {
+        BoardIcon(board, if (isChild) 34.dp else 40.dp)
+        Column(Modifier.weight(1f).padding(start = 12.dp, end = 6.dp)) {
             Text(
                 board.name,
-                style = if (isChild) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
+                fontSize = if (comfortable) 15.sp else if (isChild) 14.sp else 15.sp,
+                lineHeight = if (comfortable) 22.sp else 21.sp,
                 fontWeight = if (selected) FontWeight.SemiBold else null,
                 color = if (selected) colorScheme.onPrimaryContainer else colorScheme.onSurface,
-                maxLines = 1,
+                maxLines = if (LocalDensity.current.fontScale >= 1.3f) 2 else 1,
                 overflow = TextOverflow.Ellipsis
             )
             if (board.info.isNotBlank()) {

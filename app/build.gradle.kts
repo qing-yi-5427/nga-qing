@@ -19,8 +19,9 @@ android {
         applicationId = "com.qingyi5427.ngaqing"
         minSdk = 24
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.1.1"
+        versionCode = 5
+        versionName = "1.2.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "UI_VARIANT", "\"classic\"")
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -87,6 +88,8 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation(composeBom)
     androidTestImplementation(composeBom)
+    androidTestImplementation("androidx.test:runner:1.5.0")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
