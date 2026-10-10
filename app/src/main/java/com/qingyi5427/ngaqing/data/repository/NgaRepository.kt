@@ -49,8 +49,11 @@ import java.util.concurrent.atomic.AtomicLong
  * while some responses omit the scheme (or even the host) entirely.
  */
 internal fun normalizeNgaAvatarUrl(raw: String): String {
+    // NGA separates extra avatars with `|.a` while sharing the URL prefix.
+    // Only the first complete URL is suitable for an image loader.
     val value = raw.trim().replace("&amp;", "&").replace("\\/", "/")
-    if (value.isBlank()) return ""
+        .substringBefore("|.a").trim()
+    if (value.isBlank() || value.equals("null", ignoreCase = true)) return ""
 
     // Older NGA accounts may return the avatar field as a JSON-like history object
     // instead of a URL. Use the first image URL, matching the official client's logic.
@@ -61,7 +64,7 @@ internal fun normalizeNgaAvatarUrl(raw: String): String {
         candidate.startsWith("//") -> "https:$candidate"
         candidate.startsWith("http://", ignoreCase = true) ||
             candidate.startsWith("https://", ignoreCase = true) -> candidate
-        Regex("""^img\d*\.(nga\.cn|nga\.178\.com|ngacn\.cc)/""", RegexOption.IGNORE_CASE)
+        Regex("""^img\d*\.(nga\.cn|nga\.178\.com|ngacn\.cc|ngabbs\.com)/""", RegexOption.IGNORE_CASE)
             .containsMatchIn(candidate) -> "https://$candidate"
         candidate.startsWith("/") -> "https://img.nga.cn$candidate"
         else -> "https://img.nga.cn/${candidate.removePrefix("./")}"
@@ -69,11 +72,11 @@ internal fun normalizeNgaAvatarUrl(raw: String): String {
 
     val migrated = absolute
         .replace(
-            Regex("""^http://img(\d*)\.(nga\.178\.com|ngacn\.cc|nga\.cn)""", RegexOption.IGNORE_CASE),
+            Regex("""^http://img(\d*)\.(nga\.178\.com|ngacn\.cc|ngabbs\.com|nga\.cn)""", RegexOption.IGNORE_CASE),
             "https://img\$1.nga.cn"
         )
         .replace(
-            Regex("""^https://img(\d*)\.(nga\.178\.com|ngacn\.cc)""", RegexOption.IGNORE_CASE),
+            Regex("""^https://img(\d*)\.(nga\.178\.com|ngacn\.cc|ngabbs\.com)""", RegexOption.IGNORE_CASE),
             "https://img\$1.nga.cn"
         )
 

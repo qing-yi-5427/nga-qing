@@ -7,6 +7,7 @@ class AvatarUrlTest {
     @Test
     fun `empty avatar stays empty`() {
         assertEquals("", normalizeNgaAvatarUrl("  "))
+        assertEquals("", normalizeNgaAvatarUrl("null"))
     }
 
     @Test
@@ -26,6 +27,14 @@ class AvatarUrlTest {
     }
 
     @Test
+    fun `legacy ngabbs image host is migrated`() {
+        assertEquals(
+            "http://img.nga.cn/avatars/123/456.jpg",
+            normalizeNgaAvatarUrl("https://img.ngabbs.com/avatars/123/456.jpg")
+        )
+    }
+
+    @Test
     fun `relative avatar receives current image host`() {
         assertEquals(
             "http://img.nga.cn/avatars/123/456.jpg?x=1&y=2",
@@ -38,6 +47,22 @@ class AvatarUrlTest {
         assertEquals(
             "http://img.nga.cn/avatars/123/456.jpg?x=1",
             normalizeNgaAvatarUrl("https://img.nga.cn/avatars/123/456.jpg?x=1")
+        )
+    }
+
+    @Test
+    fun `multiple avatars use the first complete image URL`() {
+        assertEquals(
+            "http://img.nga.cn/avatars/123/first.jpg",
+            normalizeNgaAvatarUrl("https://img.nga.cn/avatars/123/first.jpg|.a/second.jpg")
+        )
+    }
+
+    @Test
+    fun `single avatar is not changed by multiple avatar parsing`() {
+        assertEquals(
+            "https://example.com/avatar.jpg?size=48",
+            normalizeNgaAvatarUrl("https://example.com/avatar.jpg?size=48")
         )
     }
 
