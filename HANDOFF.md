@@ -2,6 +2,12 @@
 
 本轮代码位于隔离工作树 `G:\AI\coding\10-nga\NgaClient-ui-v8`、分支 `feat/ui-v8-adaptive`。原工作树 `G:\AI\coding\10-nga\NgaClient` 保留，不在本轮修改或合并。视觉基准是同级 `NGA_Qing_UI_V8_Agent_Kit/nga-qing-ios-v8-inner-portrait.html` 及其 PNG；实施映射见 `docs/ui-v8-audit.md`，设备与场景记录见 `docs/ui-v8-qa/validation.md`。
 
+## 1.2.2 当前增量（2026-10-10）
+
+生产源码至提交 `48e02a403d681b3c82d19cd838608397a0dc8f45`：修复阅读回复左侧空列、常逛版块卡内容居中、搜索框双层边缘、根 Tab 从版块子页返回发现，并换为与 V8 一致的蓝白 N 气泡图标。头像数据层处理多头像值和旧图域名；测试图片与空/错误占位通过，但实际 NGA 远端头像尚待在线具体样本。原单 `NavController`、阅读锚点、回复草稿与网页直渲染边界未改。
+
+QA 全量为 50 suites、228 tests，0 失败/错误/跳过；Lint 0 error、23 warning。窄底栏/宽侧栏根 Tab 真 `NavHostController` 回归 4/4 通过。正式 1.2.2/code7 R8 包在 `G:\AI\coding\10-nga\V8_Release\nga-qing-1.2.2-v8.apk`，SHA-256 `42C393A710B5E61DFF352F19244FED0C1D5DDC1D7756CDC0CDD478EB94C4830D`；同目录有 `.sha256` 和 `build-verification-1.2.2.md`。旧 1.2.0/1.2.1 包保留。本轮设备未连接，用户已将实体操作延期，因此 1.2.2 尚无保数据安装与真实界面验收。下文是 1.2.0 的历史交接快照。
+
 ## 已实现
 
 - 发现、版块、收藏、我的四个根入口；宽屏为顶部导航，紧凑窗口为底部浮动导航。全部原有子路由仍使用同一个 `NavController`，账号 revision 切换继续重建旧会话。
