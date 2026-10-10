@@ -54,6 +54,10 @@ import com.qingyi5427.ngaqing.ui.chrome.AppTopBar
 import com.qingyi5427.ngaqing.ui.design.NgaStatePanel
 import com.qingyi5427.ngaqing.data.local.NgaDomains
 
+/** The path and action are fixed here; only [NgaDomains] may select the forum host. */
+internal fun trustedLoginPageUrl(host: String?): String =
+    NgaDomains.url(host, "nuke.php?__lib=login&__act=login_ui")
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LoginScreen(
@@ -164,7 +168,7 @@ fun LoginScreen(
                                 view.tag = ngaDomain
                                 loading = true
                                 webError = false
-                                view.loadUrl(NgaDomains.url(ngaDomain))
+                                view.loadUrl(trustedLoginPageUrl(ngaDomain))
                             }
                         },
                         onRelease = { view ->
@@ -223,7 +227,7 @@ fun LoginScreen(
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodySmall,
                             textAlign = TextAlign.Center,
-                            maxLines = 2,
+                            maxLines = 4,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
@@ -234,7 +238,7 @@ fun LoginScreen(
         AlertDialog(
             onDismissRequest = { helpOpen = false },
             title = { Text("如何登录") },
-            text = { Text("请在 NGA 网页完成扫码或账号登录。扫码后点右上角刷新，再点“完成登录”检测状态。网页内容可以双指缩放。") },
+            text = { Text("请在 NGA 网页使用账号登录，或让另一台设备扫描本页显示的二维码，以登录本应用。扫码后若未自动完成，请点右上角刷新，再点“完成登录”检测状态。网页内容可以双指缩放。") },
             confirmButton = { TextButton(onClick = { helpOpen = false }) { Text("知道了") } }
         )
     }

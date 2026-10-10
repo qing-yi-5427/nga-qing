@@ -69,8 +69,8 @@ class LoginViewModel @Inject constructor(
     }
 
     /**
-     * Called from WebViewClient.onPageFinished. NGA QR login writes the passport
-     * cookies only after the page is refreshed, so we re-check on every load.
+     * Called from WebViewClient.onPageFinished. The NGA page may write passport
+     * cookies after a refresh, so we re-check on every load.
      * Auto-navigates to boards once credentials appear. Does NOT surface an error
      * here (the user may simply not be logged in yet on this particular load).
      */
@@ -87,7 +87,8 @@ class LoginViewModel @Inject constructor(
 
     /**
      * Manual fallback triggered by the "完成登录" button. Surfaces an error if no
-     * credentials are present (e.g. the user scanned but forgot to refresh).
+     * credentials are present (e.g. the user completed the site's login flow but
+     * the WebView has not received the resulting cookies yet).
      */
     fun tryCapture() {
         if (captured) return
@@ -98,7 +99,7 @@ class LoginViewModel @Inject constructor(
                 captured = true
                 _state.value = LoginState.Success
             } else {
-                _state.value = LoginState.Error("未检测到登录凭证：请先在网页里扫码登录，扫码成功后点右上角「刷新」，再点「完成登录」")
+                _state.value = LoginState.Error("未检测到登录凭证。请完成网页的账号或验证流程；也可让另一设备扫描本页二维码。扫码后若未生效，请刷新页面再检测。")
             }
         }
     }
