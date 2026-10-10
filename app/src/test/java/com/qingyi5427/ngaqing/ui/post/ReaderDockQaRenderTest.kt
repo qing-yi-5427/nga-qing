@@ -12,6 +12,7 @@ import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.Density
@@ -34,7 +35,7 @@ class ReaderDockQaRenderTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
     @Test fun expandedDockActionsStayInsideSafeWidthAndRemainClickable() {
-        val taps = IntArray(6)
+        val taps = IntArray(4)
         var interactions = 0
         val pressStates = mutableListOf<Boolean>()
         compose.setContent {
@@ -44,49 +45,43 @@ class ReaderDockQaRenderTest {
                         ReaderDock(
                             stage = ReaderDockStage.EXPANDED,
                             replyCount = 128,
-                            currentPage = 2,
-                            totalPages = 9,
                             isFavorite = false,
                             onlyAuthor = false,
                             onExpand = {},
-                            onCollapse = { taps[5]++ },
                             onFavorite = { taps[0]++ },
-                            onPage = { taps[1]++ },
-                            onJump = { taps[2]++ },
-                            onOnlyAuthor = { taps[3]++ },
-                            onReply = { taps[4]++ },
+                            onJump = { taps[1]++ },
+                            onOnlyAuthor = { taps[2]++ },
+                            onReply = { taps[3]++ },
                             onFocusChanged = {},
                             onInteraction = { interactions++ },
                             onPressChanged = { pressStates += it },
-                            compact = true,
                             availableWidthDp = 288f
                         )
                     }
                 }
             }
         }
-        listOf(
-            "收藏",
-            "翻页，当前第 2 页，共 9 页",
-            "跳转楼层",
-            "只看楼主",
-            "回复",
-            "收起阅读操作"
-        ).forEach { label ->
-            val action = compose.onNodeWithContentDescription(label).assertIsDisplayed()
+        val actions = listOf(
+            "收藏" to compose.onNodeWithContentDescription("收藏"),
+            "跳转楼层" to compose.onNodeWithContentDescription("跳转楼层"),
+            "只看楼主" to compose.onNodeWithContentDescription("只看楼主"),
+            "写回复" to compose.onNodeWithText("写回复")
+        )
+        actions.forEach { (label, node) ->
+            val action = node.assertIsDisplayed()
             val bounds = action.getUnclippedBoundsInRoot()
             check(bounds.left >= 16.dp && bounds.right <= 304.dp) {
                 "$label falls outside the safe 288dp reader area: $bounds"
             }
             action.performClick()
         }
-        assertEquals(listOf(1, 1, 1, 1, 1, 1), taps.toList())
-        assertEquals("Every action must reset the idle timer", 6, interactions)
+        assertEquals(listOf(1, 1, 1, 1), taps.toList())
+        assertEquals("Every action must reset the idle timer", 4, interactions)
         compose.onNodeWithContentDescription("收藏").performTouchInput { click() }
         assertEquals("A pointer press must still activate the action", 2, taps[0])
-        assertEquals("Every click must pause then resume its idle timer", 7, pressStates.size / 2)
-        assertEquals("Every click must pair press and release", List(7) { listOf(true, false) }.flatten(), pressStates)
-        assertEquals("Pointer click must reset the idle timer once", 7, interactions)
+        assertEquals("Every click must pause then resume its idle timer", 5, pressStates.size / 2)
+        assertEquals("Every click must pair press and release", List(5) { listOf(true, false) }.flatten(), pressStates)
+        assertEquals("Pointer click must reset the idle timer once", 5, interactions)
         compose.runOnUiThread {
             saveNativeScreenshot(compose.activity, "v8-reader-dock-320-font1p5-expanded.png")
         }
