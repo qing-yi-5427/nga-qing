@@ -45,6 +45,7 @@ import org.junit.Test
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertFalse
+import kotlin.math.abs
 import android.graphics.Color
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -78,6 +79,80 @@ class DiscoverRenderTest {
         ThreadItem(index.toString(), titles[index - 1],
             authors[index - 1], index.toString(), 1_760_000_000L,
             replies = index * 12)
+    }
+
+    @Test
+    @Config(sdk = [33], qualifiers = "w425dp-h623dp")
+    fun favoriteCardContentCentersWithAndWithoutDescriptionOnCover() {
+        assertFavoriteCardCenters(425f, 623f, 1f, "cover")
+    }
+
+    @Test
+    @Config(sdk = [33], qualifiers = "w425dp-h623dp")
+    fun favoriteCardContentCentersWithAndWithoutDescriptionAtLargeText() {
+        assertFavoriteCardCenters(425f, 623f, 1.5f, "cover-font1p5")
+    }
+
+    @Test
+    @Config(sdk = [33], qualifiers = "w698dp-h986dp")
+    fun favoriteCardContentCentersWithAndWithoutDescriptionOnInnerPortrait() {
+        assertFavoriteCardCenters(698f, 986f, 1f, "innerP")
+    }
+
+    @Test
+    @Config(sdk = [33], qualifiers = "w860dp-h608dp")
+    fun favoriteCardContentCentersWithAndWithoutDescriptionOnWideWindow() {
+        assertFavoriteCardCenters(860f, 608f, 1f, "wide")
+    }
+
+    private fun assertFavoriteCardCenters(width: Float, height: Float, fontScale: Float, suffix: String) {
+        val withoutDescription = Board("501", "无介绍版块")
+        val withDescription = Board("502", "有介绍版块", info = "可见的版块说明")
+        val favorites = listOf(withoutDescription, withDescription)
+        val vm = mockk<DiscoverViewModel>(relaxed = true)
+        every { vm.state } returns MutableStateFlow<DiscoverState>(DiscoverState.Ready(
+            boards = favorites, discussionBoard = withoutDescription, discussions = emptyList()))
+        every { vm.favoriteBoards } returns MutableStateFlow(favorites)
+        every { vm.history } returns MutableStateFlow(emptyList())
+        compose.setContent {
+            NgaQingTheme(themeMode = "light") {
+                CompositionLocalProvider(
+                    LocalDensity provides Density(1f, fontScale),
+                    LocalV8LayoutPolicy provides decideV8LayoutPolicy(width, height, fontScale)
+                ) {
+                    Box(Modifier.size(width.dp, height.dp)) {
+                        DiscoverScreen(rememberNavController(), vm)
+                    }
+                }
+            }
+        }
+        compose.waitForIdle()
+        for ((board, lastLine) in listOf(
+            withoutDescription to withoutDescription.name,
+            withDescription to withDescription.info
+        )) {
+            val card = compose.onNodeWithTag("discover-board-card-${board.fid}", useUnmergedTree = true)
+                .assertIsDisplayed().getUnclippedBoundsInRoot()
+            val icon = compose.onNodeWithTag("discover-board-icon-${board.fid}", useUnmergedTree = true)
+                .assertIsDisplayed().getUnclippedBoundsInRoot()
+            val title = compose.onNodeWithText(board.name, useUnmergedTree = true)
+                .assertIsDisplayed().getUnclippedBoundsInRoot()
+            val bottom = compose.onNodeWithText(lastLine, useUnmergedTree = true)
+                .assertIsDisplayed().getUnclippedBoundsInRoot().bottom
+            val contentTop = minOf(icon.top, title.top)
+            val contentBottom = maxOf(icon.bottom, bottom)
+            check(contentTop >= card.top && contentBottom <= card.bottom) {
+                "Board ${board.fid} content clips its card: card=$card icon=$icon bottom=$bottom"
+            }
+            val contentCenter = (contentTop + contentBottom) / 2f
+            val cardCenter = (card.top + card.bottom) / 2f
+            check(abs((contentCenter - cardCenter).value) <= 7f) {
+                "Board ${board.fid} visible icon/text group is off center: card=$card icon=$icon bottom=$bottom"
+            }
+        }
+        compose.runOnUiThread {
+            saveNativeScreenshot(compose.activity, "v8-122-home-boards-$suffix.png")
+        }
     }
 
     @Test fun phonePortraitKeepsFourBoardsAndReadableDiscussion() {

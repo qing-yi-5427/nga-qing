@@ -226,8 +226,9 @@ class SecondaryScreensRenderTest {
 
     @Test
     fun profileLoadsLocalAvatarAndRendersItOverPlaceholder() {
-        // The bundled public PNG has orange pixels; the profile placeholder and theme do not.
-        val avatar = "android.resource://${compose.activity.packageName}/drawable/ic_launcher_foreground"
+        // Public GitHub photo fixture; verifies the local Coil path, not NGA network delivery.
+        val photo = requireNotNull(javaClass.classLoader?.getResource("avatar/github-u1.png"))
+        val avatar = photo.toURI().toString()
         val imageFailure = AtomicReference<Throwable?>()
         val model = mockk<RootViewModel>(relaxed = true) {
             every { accountDisplay } returns MutableStateFlow(
@@ -241,7 +242,7 @@ class SecondaryScreensRenderTest {
                 runCatching { compose.onNodeWithTag("profile-avatar-failed").assertExists(); true }
                     .getOrDefault(false)
         }
-        screenshot("secondary-profile-local-avatar-loaded.png")
+        screenshot("v8-122-profile-local-avatar-loaded.png")
         assertTrue("Coil failed for bundled avatar fixture: " +
             "${imageFailure.get()?.javaClass?.simpleName}: ${imageFailure.get()?.message}",
             runCatching { compose.onNodeWithTag("profile-avatar-loaded").assertExists(); true }
@@ -255,13 +256,15 @@ class SecondaryScreensRenderTest {
         val top = avatarBounds.top.toInt().coerceIn(0, image.height)
         val right = kotlin.math.ceil(avatarBounds.right).toInt().coerceIn(left, image.width)
         val bottom = kotlin.math.ceil(avatarBounds.bottom).toInt().coerceIn(top, image.height)
-        val visibleOrangePixel = (top until bottom).any { y ->
+        val visiblePortraitPixel = (top until bottom).any { y ->
             (left until right).any { x ->
                 val pixel = image.getPixel(x, y)
-                Color.red(pixel) > 190 && Color.green(pixel) in 65..180 && Color.blue(pixel) < 80
+                Color.red(pixel) > Color.green(pixel) + 15 &&
+                    Color.green(pixel) > Color.blue(pixel) + 5
             }
         }
-        assertTrue("Loaded avatar must be visible in its native frame bounds: $avatarBounds", visibleOrangePixel)
+        assertTrue("Loaded avatar must be visible in its native frame bounds: $avatarBounds",
+            visiblePortraitPixel)
     }
 
     @Test

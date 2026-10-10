@@ -4,14 +4,18 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import androidx.core.view.drawToBitmap
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onLast
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -35,6 +39,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
+import kotlin.math.abs
 
 /** Same title and story as the HTML prototype, rendered by production PostScreen. */
 @RunWith(RobolectricTestRunner::class)
@@ -82,10 +87,105 @@ class ReaderHtmlVisualRenderTest {
         compose.onNodeWithText("引用仍可阅读").assertIsDisplayed()
     }
 
-    private fun renderReader(width: Float, height: Float, medium: Boolean) {
+    @Test
+    @Config(sdk = [33], qualifiers = "w425dp-h623dp")
+    fun replyBodyQuoteAndActionsShareMainBodyLeftEdgeOnCover() {
+        assertReplyLeftEdge(425f, 623f, medium = false, "cover")
+    }
+
+    @Test
+    @Config(sdk = [33], qualifiers = "w698dp-h986dp")
+    fun replyBodyQuoteAndActionsShareMainBodyLeftEdgeOnInnerPortrait() {
+        assertReplyLeftEdge(698f, 986f, medium = true, "innerP")
+    }
+
+    @Test
+    @Config(sdk = [33], qualifiers = "w986dp-h698dp")
+    fun replyBodyQuoteAndActionsShareMainBodyLeftEdgeOnWideWindow() {
+        assertReplyLeftEdge(986f, 698f, medium = true, "wide")
+    }
+
+    @Test
+    @Config(sdk = [33], qualifiers = "w425dp-h623dp")
+    fun publicPhotoFixtureIsDecodedAndVisibleInsteadOfInitial() {
+        val resource = requireNotNull(javaClass.classLoader?.getResource("avatar/github-u1.png"))
+        renderReader(425f, 623f, medium = false, avatar = resource.toURI().toString())
+        compose.onAllNodesWithTag("post-author-avatar").onFirst().assertIsDisplayed()
+        compose.waitUntil(5_000) { avatarCenterPixel()?.let(::isPortraitSkinPixel) == true }
+        compose.runOnUiThread {
+            saveNativeScreenshot(compose.activity, "v8-122-avatar-loaded-public-fixture.png")
+        }
+    }
+
+    @Test
+    @Config(sdk = [33], qualifiers = "w425dp-h623dp")
+    fun blankAvatarKeepsInitialFallback() {
+        renderReader(425f, 623f, medium = false, avatar = "")
+        compose.onAllNodesWithTag("post-author-avatar").onFirst().assertIsDisplayed()
+        check(avatarCenterPixel()?.let(::isPortraitSkinPixel) == false)
+        compose.runOnUiThread {
+            saveNativeScreenshot(compose.activity, "v8-122-avatar-blank-fallback.png")
+        }
+    }
+
+    @Test
+    @Config(sdk = [33], qualifiers = "w425dp-h623dp")
+    fun failedAvatarKeepsInitialFallback() {
+        renderReader(425f, 623f, medium = false, avatar = "file:///missing-v8-avatar.jpg")
+        compose.onAllNodesWithTag("post-author-avatar").onFirst().assertIsDisplayed()
+        compose.waitForIdle()
+        check(avatarCenterPixel()?.let(::isPortraitSkinPixel) == false)
+        compose.runOnUiThread {
+            saveNativeScreenshot(compose.activity, "v8-122-avatar-error-fallback.png")
+        }
+    }
+
+    private fun avatarCenterPixel(): Int? {
+        val bounds = compose.onAllNodesWithTag("post-author-avatar").onFirst()
+            .getUnclippedBoundsInRoot()
+        var pixel: Int? = null
+        compose.runOnUiThread {
+            val bitmap = compose.activity.window.decorView.drawToBitmap()
+            val x = ((bounds.left + bounds.right) / 2f).value.toInt()
+            val y = ((bounds.top + bounds.bottom) / 2f).value.toInt()
+            if (x in 0 until bitmap.width && y in 0 until bitmap.height) {
+                pixel = bitmap.getPixel(x, y)
+            }
+            bitmap.recycle()
+        }
+        return pixel
+    }
+
+    private fun isPortraitSkinPixel(pixel: Int): Boolean =
+        Color.red(pixel) > Color.green(pixel) + 15 &&
+            Color.green(pixel) > Color.blue(pixel) + 5
+
+    private fun assertReplyLeftEdge(width: Float, height: Float, medium: Boolean, suffix: String) {
+        renderReader(width, height, medium)
+        val mainLeft = compose.onNodeWithText(FIRST_PARAGRAPH, substring = true)
+            .assertIsDisplayed().getUnclippedBoundsInRoot().left
+        compose.onNodeWithTag("post-reading-list").performScrollToIndex(1)
+        val replyLeft = compose.onNodeWithText("同感！能够一键收起列表很重要", substring = true)
+            .assertIsDisplayed().getUnclippedBoundsInRoot().left
+        val quoteLeft = compose.onAllNodesWithTag("post-quote").onLast()
+            .assertIsDisplayed().getUnclippedBoundsInRoot().left
+        val actionsLeft = compose.onAllNodesWithTag("post-reply-actions").onFirst()
+            .assertIsDisplayed().getUnclippedBoundsInRoot().left
+        listOf("reply" to replyLeft, "quote" to quoteLeft, "actions" to actionsLeft)
+            .forEach { (name, left) ->
+                check(abs((left - mainLeft).value) <= 4f) {
+                    "$name starts after a redundant avatar column: main=$mainLeft actual=$left"
+                }
+            }
+        compose.runOnUiThread {
+            saveNativeScreenshot(compose.activity, "v8-122-reader-reply-$suffix.png")
+        }
+    }
+
+    private fun renderReader(width: Float, height: Float, medium: Boolean, avatar: String = "") {
         val imageFile = makeIllustration()
         val first = Post("html-reader", "html-first", "晚风过境", "42", STORY_TITLE,
-            1_790_540_000L, 0, "$FIRST_PARAGRAPH\n\n$SECOND_PARAGRAPH")
+            1_790_540_000L, 0, "$FIRST_PARAGRAPH\n\n$SECOND_PARAGRAPH", avatar = avatar)
         val reply = Post("html-reader", "html-reply", "山间回声", "43", "",
             1_790_540_600L, 1, "同感！能够一键收起列表很重要，安静看完一篇文章再切回来，整个过程就很顺。")
         val later = Post("html-reader", "html-later", "云间来信", "44", "",
