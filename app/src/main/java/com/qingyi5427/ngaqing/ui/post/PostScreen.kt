@@ -1240,7 +1240,7 @@ private fun PostCard(
 private fun AuthorAvatar(avatar: String, author: String, size: androidx.compose.ui.unit.Dp) {
     var loaded by remember(avatar) { mutableStateOf(false) }
     Box(
-        modifier = Modifier.size(size),
+        modifier = Modifier.size(size).testTag("post-author-avatar"),
         contentAlignment = Alignment.Center
     ) {
         if (!loaded) {

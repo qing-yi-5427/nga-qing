@@ -82,11 +82,17 @@ val RootNavigationRailWidth = 88.dp
 val LocalRootNavigationRail = staticCompositionLocalOf { false }
 
 internal fun NavHostController.openRootTab(route: String) {
+    if (currentDestination?.route == route) return
+    // A root already on this stack keeps its ViewModel and scroll position.
+    if (popBackStack(route, inclusive = false, saveState = true)) return
     navigate(route) {
         popUpTo(graph.findStartDestination().id) { saveState = true }
         launchSingleTop = true
         restoreState = true
     }
+    // Restoring a saved tab can also restore a child such as Threads. A tab
+    // tap always lands on the tab's root while preserving that root's state.
+    if (currentDestination?.route != route) popBackStack(route, inclusive = false)
 }
 
 private fun NavHostController.openBoardDirectory() {
