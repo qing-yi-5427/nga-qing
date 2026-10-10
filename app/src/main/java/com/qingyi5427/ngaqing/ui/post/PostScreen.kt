@@ -1178,11 +1178,11 @@ private fun PostCard(
             Spacer(Modifier.height(10.dp))
         }
         // 正文
-        Column(Modifier.padding(start = if (mainBody) 0.dp else 38.dp)) {
+        Column(Modifier.fillMaxWidth().testTag("post-body")) {
             blocks.forEach { block -> RenderBlock(block, onImage, onJumpToFloor, bodyStyle) }
         }
         if (!mainBody) {
-            Row(Modifier.padding(start = 38.dp, top = 12.dp),
+            Row(Modifier.padding(top = 12.dp).testTag("post-reply-actions"),
                 horizontalArrangement = Arrangement.spacedBy(18.dp)) {
                 Text("回复", modifier = Modifier.clickable { onReply(post, false) },
                     style = MaterialTheme.typography.labelSmall,
@@ -1624,6 +1624,7 @@ private fun RenderBlock(
                     .then(
                         if (floor != null) Modifier.clickable { onJumpToFloor(floor) } else Modifier
                     )
+                    .testTag("post-quote")
             ) {
                 Column(
                     Modifier.weight(1f)

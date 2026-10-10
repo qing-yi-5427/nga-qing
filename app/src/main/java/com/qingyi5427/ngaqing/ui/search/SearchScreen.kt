@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,6 +24,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -38,13 +40,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -54,7 +56,6 @@ import com.qingyi5427.ngaqing.data.model.ThreadItem
 import com.qingyi5427.ngaqing.ui.Routes
 import com.qingyi5427.ngaqing.ui.chrome.AppTopBar
 import com.qingyi5427.ngaqing.ui.design.NgaStatePanel
-import com.qingyi5427.ngaqing.ui.design.NgaGlassSurface
 import com.qingyi5427.ngaqing.ui.gesture.SwipeBackContainer
 import com.qingyi5427.ngaqing.ui.util.formatRelative
 import com.qingyi5427.ngaqing.ui.util.formatAuthorName
@@ -91,28 +92,39 @@ fun SearchScreen(
                 }
             }
         )
-        NgaGlassSurface(Modifier.fillMaxWidth().padding(horizontal = 16.dp,
-            vertical = if (compactHeight) 4.dp else 12.dp)) {
+        Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp,
+            vertical = if (compactHeight) 4.dp else 12.dp)
+            .testTag("search-field-shell")) {
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
             placeholder = { Text(if (fid.isNullOrBlank() && stid.isNullOrBlank()) "搜索主题" else "在当前版块搜索") },
             leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
             trailingIcon = {
-                IconButton(onClick = submit, enabled = query.isNotBlank()) {
-                    Icon(Icons.Filled.Search, contentDescription = "搜索")
+                Row {
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = {
+                            query = ""
+                            viewModel.search("", fid, stid)
+                        }) {
+                            Icon(Icons.Filled.Close, contentDescription = "清除搜索内容")
+                        }
+                    }
+                    IconButton(onClick = submit, enabled = query.isNotBlank()) {
+                        Icon(Icons.Filled.Search, contentDescription = "搜索")
+                    }
                 }
             },
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { submit() }),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(16.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                unfocusedBorderColor = Color.Transparent,
-                focusedContainerColor = Color.Transparent,
-                unfocusedContainerColor = Color.Transparent),
-            modifier = Modifier.fillMaxWidth()
+                focusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                focusedContainerColor = MaterialTheme.colorScheme.surface,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surface),
+            modifier = Modifier.fillMaxWidth().testTag("search-field")
         )
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

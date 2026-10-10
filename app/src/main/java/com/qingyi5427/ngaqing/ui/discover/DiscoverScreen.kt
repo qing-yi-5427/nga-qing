@@ -58,6 +58,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -337,24 +338,32 @@ private fun BoardSection(
                     else -> Icons.Outlined.Code
                 }
                 Surface(onClick = { onOpen(board) }, modifier = Modifier.weight(1f)
-                    .heightIn(min = if (fourColumns) 96.dp else if (comfortable) 88.dp else 63.dp),
+                    .heightIn(min = if (fourColumns) 96.dp else if (comfortable) 88.dp else 63.dp)
+                    .testTag("discover-board-card-${board.fid}"),
                     shape = RoundedCornerShape(15.dp), color = MaterialTheme.colorScheme.surface,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
                     val icon: @Composable () -> Unit = {
                         if (board.iconUrl != null) AsyncImage(board.iconUrl, contentDescription = null,
-                            modifier = Modifier.size(if (fourColumns) 28.dp else 27.dp))
+                            modifier = Modifier.size(if (fourColumns) 28.dp else 27.dp)
+                                .testTag("discover-board-icon-${board.fid}"))
                         else Icon(symbol, contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(if (fourColumns) 28.dp else 27.dp))
+                            modifier = Modifier.size(if (fourColumns) 28.dp else 27.dp)
+                                .testTag("discover-board-icon-${board.fid}"))
                     }
                     if (fourColumns) {
-                        Column(Modifier.fillMaxWidth().padding(horizontal = 3.dp, vertical = 9.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        Column(Modifier.fillMaxWidth().heightIn(min = 96.dp)
+                            .padding(horizontal = 3.dp, vertical = 9.dp)
+                            .testTag("discover-board-content-${board.fid}"),
+                            verticalArrangement = Arrangement.Center,
                             horizontalAlignment = Alignment.CenterHorizontally) {
                             icon()
-                            Text(board.name, fontSize = 13.sp, lineHeight = 16.sp, maxLines = 1,
+                            Text(board.name, modifier = Modifier.padding(top = 4.dp),
+                                fontSize = 13.sp, lineHeight = 16.sp, maxLines = 1,
                                 overflow = TextOverflow.Ellipsis)
-                            if (board.info.isNotBlank()) Text(board.info, fontSize = 11.sp, lineHeight = 14.sp,
+                            if (board.info.isNotBlank()) Text(board.info,
+                                modifier = Modifier.padding(top = 4.dp),
+                                fontSize = 11.sp, lineHeight = 14.sp,
                                 color = MaterialTheme.colorScheme.outline, maxLines = 1,
                                 overflow = TextOverflow.Ellipsis)
                         }
