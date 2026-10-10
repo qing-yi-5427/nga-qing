@@ -28,7 +28,7 @@
 | --- | --- | --- | --- |
 | P0-0 | 保留基线并能覆盖升级 | worktree、`app/build.gradle`、包签名 | 基线 `testDebugUnitTest assembleDebug` 156/156；正式 Release 同证书保数据安装，设备 `base.apk` 与交付包逐字节同散列 |
 | P0-1 | HTML V8 视觉、四主页面字号/深浅 | `Theme`、Discover/Favorites/Thread/Post、`RootPaneRenderTest`、[四张固定测试样张](evidence/index.md) | 根代理接受四核心同窗样图及 A63 真机 Home/Reader/深色方向；非像素一致。实体字体 1.3/1.5 受系统权限阻挡，仅 Compose/Robolectric 覆盖 |
-| P0-2 | 发现真实内容/状态、离线本地续读、版块/收藏自适应 | Discover/Board/Favorites、对应渲染/VM 测试 | 当前包真机公开讨论与真实续读卡可见；断网无默认网络时卡片仍显示第 5 楼，错误文案已为中文“当前无法连接 NGA，请检查网络后重试”并有重试入口；实体宽窗未测 |
+| P0-2 | 发现真实内容/状态、离线本地续读、版块/收藏自适应 | Discover/Board/Favorites、对应渲染/VM 测试 | 正式 Release 真机公开讨论与真实续读卡可见；80B64A 最终 Debug 候选（与 Release 同生产源码）断网后卡片仍显示第 5 楼，错误文案为中文“当前无法连接 NGA，请检查网络后重试”且有重试入口；实体宽窗未测 |
 | P0-3 | 折痕安全矩形、840dp 与短高/字号降级、正文宽度 | `PaneLayout`、`RootContentPolicy`、`RootPaneRenderTest`、Reader 宽窗渲染 | 策略与 Native Compose 模拟通过；A63 实体 869×400dp 横屏使用底部导航，不误显示宽屏顶导航。真实铰链与实体 Fold 未测 |
 | P0-4 | 阅读 Dock 四动作、折叠/展开/计时/触摸/IME | `PostScreen`、`ReaderDockQaRenderTest`、`ReaderDockStateTest`、`ReaderStateTransitionRenderTest` | 320dp/font1.5 与状态定向测试已通过；Debug 实机编辑器获焦、系统 IME 显示且输入区无遮挡，未输入/发送。TalkBack 运行中启用与 dock 全手势未实体实测 |
 | P0-5 | 四 Tab、来源/返回、账号与历史、阅读位置、草稿、WebView | `NgaNavHost`、`NavigationMotionTest`、`RootReadOnlySmokeTest`、Repository/草稿/Reader 单测 | Debug Runner 四 Tab/版块搜索/历史通过，#5 三次通过；正式 Release 独立外部容器四 Tab/搜索/历史 PASS、#5 两次 PASS。原账号数据保留。一次 Debug 跳楼前置空楼层的瞬态未定位。真实发送、账号切换与实体 Fold 不执行 |
@@ -45,11 +45,11 @@ WebView 阅读兜底须继续在 PullToRefreshBox 与 `ngaBackdropSource` 之外
 | 实体竖屏 400×869dp/font1.0 | 正式 Release Home/Reader 实际窗口、打孔/手势 Insets、四 Tab、公开帖子与状态栏已看；第 5 楼真机首页与 Reader 原图 `G:\AI\coding\10-nga\V8_QA_local\release-home-card5.png`、`release-reader-floor5.png`，不进入公共仓库 |
 | 实体横屏 869×400dp/font1.0 | 标准 `wm user-rotation lock 1` 成功，A63 首页短高回退底部四 Tab；本地 `A63-real-phone-landscape.png`。已恢复 `wm user-rotation free`、自动旋转 1/rotation0 |
 | 实体深色/浅色 | 标准 `cmd uimode night yes/no` + 冷启，A63 两种主题可见；本地 `A63-real-phone-dark-cold-loaded.png`、`A63-real-phone-light-cold.png`。已恢复原 `custom_schedule`/3 |
-| 实体离线/恢复 | 当前包 `svc wifi disable` 后默认网络 `none`，Home 本地第 5 楼续读卡留存，公开讨论显示中文错误和“重试”；本地 `new80-real-phone-offline.png`。Wi-Fi 已恢复 1、默认网络恢复；飞行模式 0 |
+| 实体离线/恢复 | 80B64A 最终 Debug 候选（与 Release 同生产源码）`svc wifi disable` 后默认网络 `none`，Home 本地第 5 楼续读卡留存，公开讨论显示中文错误和“重试”；本地 `new80-real-phone-offline.png`。Wi-Fi 已恢复 1、默认网络恢复；飞行模式 0 |
 | phoneP/phoneL、coverP/coverL、innerP/innerL 六预设 | HyperOS 拒绝标准 `wm size`/`wm density` 覆盖（`WRITE_SECURE_SETTINGS`）；六次请求均未改变物理 1200×2608/480。故**没有实体窗口模拟截图**；[同窗 Native Compose/Robolectric fixture](evidence/index.md)与策略测试是替代，不能称实体 Fold |
 | fontScale 1.3/1.5 | 标准 `settings put system font_scale` 被 `WRITE_SETTINGS` 拒绝，值保持 1.0；只计入 Compose/Robolectric 窄宽字号测试。没有实体大字结论 |
 | 实体 Fold 开合/折痕/铰链 | 当前只连接直板机；未验证 |
-| IME、TalkBack、真实账号切换 | 当前包真实回复菜单→空白编辑器→点击输入框：系统 `mImeWindowVis=3`、`mInputShown=true`，键盘与输入区/取消栏无覆盖，退出未输入/发送；本地私密截图不公开。TalkBack、跨账号和编辑器宽窄切换未实体实测 |
+| IME、TalkBack、真实账号切换 | 80B64A 最终 Debug 候选（与 Release 同生产源码）真实回复菜单→空白编辑器→点击输入框：系统 `mImeWindowVis=3`、`mInputShown=true`，键盘与输入区/取消栏无覆盖，退出未输入/发送；本地私密截图不公开。TalkBack、跨账号和编辑器宽窄切换未实体实测 |
 
 设备已核回 1200×2608/480、font1.0、自动旋转1/rotation0、`custom_schedule`/3、Wi-Fi1、飞行0；仅目标正式 App `com.qingyi5427.ngaqing` 留在设备上，本轮独立 helper、Debug 测试包及 `/sdcard/Download/nga_v8_*.png` 临时图均清理。公开截图证据与含私密信息的现场截图分开管理。六预设失败尝试所得图片全部是原生尺寸，不纳入成果。
 
@@ -59,12 +59,12 @@ WebView 阅读兜底须继续在 PullToRefreshBox 与 `ngaBackdropSource` 之外
 | --- | --- |
 | A/J | #5 宽→窄→宽、专注与实体铰链不可实测；Reader Compose 状态转换测试覆盖部分；实体 Fold 未验证 |
 | B | 宽栏主题选中/切帖由 Root/Thread 渲染与状态测试覆盖；实体手机仅单栏导航，宽窗实体未验证 |
-| C | 回复草稿/光标跨布局由 Reader Compose 编辑器测试覆盖；实体 IME 与真实横竖旋转中编辑器未验证，绝不发送 |
+| C | 回复草稿/光标跨布局由 Reader Compose 编辑器测试覆盖；80B64A 最终 Debug 候选实体 IME 已验证，真实横竖旋转中的编辑器/光标未验证，绝不发送 |
 | D/E | Dock 展开/计时、空白唤起、局部点击由 Reader 状态/渲染测试覆盖；实体滑动与 TalkBack 同时开启未验证 |
 | F | 收藏筛选/账号隔离由 Favorites/Repository 自动测试覆盖；A63 离线实体只验证了发现页，不把它算收藏同步 |
 | G | 1.5 字号渲染测试覆盖；实体被系统权限阻挡 |
-| H | 当前包 Profile 菜单→阅读记录→返回、回复编辑器与IME已由只读 Runner/系统标志验证；未输入/发送，登录/私信/发帖发送未执行 |
-| I | 当前包实体竖横屏 cutout/手势区、回复编辑器IME无遮挡已看；实体铰链未验证 |
+| H | 正式 Release Profile 菜单→阅读记录→返回经独立外部容器验证；80B64A 最终 Debug 候选的回复编辑器与 IME 经只读 Runner/系统标志验证。未输入/发送，登录/私信/发帖发送未执行 |
+| I | 正式 Release 实体竖屏与 80B64A 最终 Debug 候选实体横屏的 cutout/手势区已看；Debug 回复编辑器 IME 无遮挡，实体铰链未验证 |
 | K | A63 旧包真实 #5 曾错回 #9；当前修复包连续两轮卡片第 5 楼、再入首个可见 #5，另初轮同结果。一次跳楼前置空楼层未定位 |
 | L | 四 Tab/返回已 A63 实体验证；深链与状态栈由自动测试覆盖；离线本地续读实体可见，真实远端行为不推断 |
 
