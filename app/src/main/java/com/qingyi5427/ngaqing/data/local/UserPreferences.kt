@@ -28,6 +28,8 @@ data class SavedAccount(val uid: String, val cid: String, val username: String, 
 data class RequestPreferences(val uid: String, val cid: String, val ngaDomain: String, val revision: Long = 0L)
 data class AccountDisplay(val uid: String = "", val username: String = "", val avatar: String = "", val revision: Long = 0L)
 
+enum class ReadingDockMode { AUTO, BOOKS }
+
 private val Context.dataStore by preferencesDataStore("user_prefs")
 
 @Singleton
@@ -60,6 +62,10 @@ class UserPreferences @Inject constructor(
     val readingTextScale: Flow<Float> = ds.data.map { (it[KEY_READING_TEXT_SCALE] ?: 1f).coerceIn(0.9f, 1.35f) }
     val readingLineSpacing: Flow<Float> = ds.data.map { (it[KEY_READING_LINE_SPACING] ?: 1f).coerceIn(0.9f, 1.25f) }
     val showSignatures: Flow<Boolean> = ds.data.map { it[KEY_SHOW_SIGNATURES] ?: true }
+    val readingDockMode: Flow<ReadingDockMode> = ds.data.map { values ->
+        runCatching { ReadingDockMode.valueOf(values[KEY_READING_DOCK_MODE] ?: ReadingDockMode.AUTO.name) }
+            .getOrDefault(ReadingDockMode.AUTO)
+    }
     val accounts: Flow<List<SavedAccount>> = ds.data.map { parseAccounts(it[KEY_ACCOUNTS]) }
     val session: Flow<RequestPreferences> = ds.data.map { it.toRequestPreferences() }
 
@@ -197,6 +203,10 @@ class UserPreferences @Inject constructor(
         ds.edit { it[KEY_SHOW_SIGNATURES] = value }
     }
 
+    suspend fun setReadingDockMode(mode: ReadingDockMode) {
+        ds.edit { it[KEY_READING_DOCK_MODE] = mode.name }
+    }
+
     suspend fun setBlacklistUsers(set: Set<String>) {
         ds.edit { it[KEY_BL_USERS] = set.joinToString(",") }
     }
@@ -253,6 +263,7 @@ class UserPreferences @Inject constructor(
         val KEY_READING_TEXT_SCALE = floatPreferencesKey("reading_text_scale")
         val KEY_READING_LINE_SPACING = floatPreferencesKey("reading_line_spacing")
         val KEY_SHOW_SIGNATURES = booleanPreferencesKey("show_signatures")
+        val KEY_READING_DOCK_MODE = stringPreferencesKey("reading_dock_mode")
         val KEY_ACCOUNTS = stringPreferencesKey("accounts")
         val KEY_SESSION_REVISION = longPreferencesKey("session_revision")
         val KEY_BL_USERS = stringPreferencesKey("bl_users")

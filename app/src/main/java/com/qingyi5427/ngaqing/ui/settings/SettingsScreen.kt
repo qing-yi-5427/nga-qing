@@ -52,6 +52,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.qingyi5427.ngaqing.ui.Routes
 import com.qingyi5427.ngaqing.data.local.NgaDomains
+import com.qingyi5427.ngaqing.data.local.ReadingDockMode
 import com.qingyi5427.ngaqing.ui.chrome.AppTopBar
 import com.qingyi5427.ngaqing.ui.gesture.SwipeBackContainer
 
@@ -65,6 +66,7 @@ fun SettingsScreen(nav: NavHostController, viewModel: SettingsViewModel = hiltVi
     val readingTextScale by viewModel.readingTextScale.collectAsStateWithLifecycle()
     val readingLineSpacing by viewModel.readingLineSpacing.collectAsStateWithLifecycle()
     val showSignatures by viewModel.showSignatures.collectAsStateWithLifecycle()
+    val readingDockMode by viewModel.readingDockMode.collectAsStateWithLifecycle()
     val accounts by viewModel.accounts.collectAsStateWithLifecycle()
     val activeUid by viewModel.activeUid.collectAsStateWithLifecycle()
     var userInput by remember { mutableStateOf("") }
@@ -142,6 +144,29 @@ fun SettingsScreen(nav: NavHostController, viewModel: SettingsViewModel = hiltVi
                         onClick = { viewModel.setShowSignatures(!showSignatures) },
                         modifier = Modifier.heightIn(min = 48.dp),
                         label = { Text(if (showSignatures) "显示用户签名" else "隐藏用户签名") }
+                    )
+                    Text("阅读工具条", style = MaterialTheme.typography.bodyMedium)
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        FilterChip(
+                            selected = readingDockMode == ReadingDockMode.AUTO,
+                            onClick = { viewModel.setReadingDockMode(ReadingDockMode.AUTO) },
+                            modifier = Modifier.heightIn(min = 48.dp),
+                            label = { Text("自动显示") }
+                        )
+                        FilterChip(
+                            selected = readingDockMode == ReadingDockMode.BOOKS,
+                            onClick = { viewModel.setReadingDockMode(ReadingDockMode.BOOKS) },
+                            modifier = Modifier.heightIn(min = 48.dp),
+                            label = { Text("纯净阅读") }
+                        )
+                    }
+                    Text(
+                        "纯净阅读时，轻触正文两侧空白可短暂唤出工具条；顶部更多菜单始终可用。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }

@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.qingyi5427.ngaqing.data.local.UserPreferences
 import com.qingyi5427.ngaqing.data.local.RequestPreferences
 import com.qingyi5427.ngaqing.data.local.AccountDisplay
+import com.qingyi5427.ngaqing.data.local.ReadingDockMode
 import com.qingyi5427.ngaqing.data.repository.NgaRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
@@ -93,6 +94,7 @@ class RootViewModel @Inject constructor(
     val readingTextScale = prefs.readingTextScale.stateIn(viewModelScope, SharingStarted.Eagerly, 1f)
     val readingLineSpacing = prefs.readingLineSpacing.stateIn(viewModelScope, SharingStarted.Eagerly, 1f)
     val showSignatures = prefs.showSignatures.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val readingDockMode = prefs.readingDockMode.stateIn(viewModelScope, SharingStarted.Eagerly, ReadingDockMode.AUTO)
 }
 
 data class ProfileLoadState(

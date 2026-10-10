@@ -1,5 +1,9 @@
 package com.qingyi5427.ngaqing.ui.primary
 
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -18,6 +22,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -38,9 +43,12 @@ import androidx.navigation.compose.rememberNavController
 import com.qingyi5427.ngaqing.data.model.Board
 import com.qingyi5427.ngaqing.data.model.Post
 import com.qingyi5427.ngaqing.data.model.ThreadItem
+import com.qingyi5427.ngaqing.data.local.ReadingDockMode
 import com.qingyi5427.ngaqing.ui.ReadingPane
 import com.qingyi5427.ngaqing.ui.Routes
 import com.qingyi5427.ngaqing.ui.adaptive.calculatePaneLayout
+import com.qingyi5427.ngaqing.ui.adaptive.LocalV8LayoutPolicy
+import com.qingyi5427.ngaqing.ui.adaptive.V8LayoutPolicy
 import com.qingyi5427.ngaqing.ui.post.PostBlock
 import com.qingyi5427.ngaqing.ui.post.PostRenderData
 import com.qingyi5427.ngaqing.ui.post.PostScreen
@@ -62,6 +70,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import java.io.File
 
 /** Exercises the production reading screens with real Compose layout and injected screen state. */
 @RunWith(RobolectricTestRunner::class)
@@ -149,10 +158,12 @@ class PrimaryScreensRenderTest {
         compose.onNode(isSelected() and hasText(subject)).assertIsDisplayed()
         val selectedTitle = compose.onNode(isSelected() and hasText(subject)).getUnclippedBoundsInRoot()
         val readingText = compose.onNodeWithText(post.content).assertIsDisplayed().getUnclippedBoundsInRoot()
+        compose.onNodeWithText("回复 2").performClick()
         val replyAction = compose.onNodeWithText("回复").assertIsDisplayed().getUnclippedBoundsInRoot()
         check(selectedTitle.right < readingText.left)
         check(replyAction.left > selectedTitle.right && replyAction.right <= 1200.dp)
-        check(compose.onNodeWithTag("root-navigation-group").getUnclippedBoundsInRoot().right <= 88.dp)
+        compose.onNodeWithTag("root-navigation-group").assertDoesNotExist()
+        check(readingText.right - readingText.left > 500.dp) { "Reader should gain width without a permanent third rail" }
         compose.runOnUiThread {
             saveNativeScreenshot(compose.activity, "primary-reading-1200x800-light.png")
         }
@@ -265,6 +276,7 @@ class PrimaryScreensRenderTest {
         every { vm.replySucceeded } returns MutableStateFlow(false)
         every { vm.favoriteError } returns MutableStateFlow<String?>(null)
         render(themeMode = "dark", fontScale = 2f) { nav -> PostScreen(nav, vm, dark = true) }
+        compose.onNodeWithText("回复 1").performClick()
         compose.onNodeWithContentDescription("翻页，当前第 1 页，共 123456 页").assertIsDisplayed()
         compose.runOnUiThread {
             saveNativeScreenshot(compose.activity, "primary-post-320-dark-2x.png")
@@ -336,16 +348,17 @@ class PrimaryScreensRenderTest {
         render { nav -> PostScreen(nav, vm, dark = false) }
         compose.onNode(hasText("一篇正常阅读的主题") and hasClickAction()).assertIsDisplayed()
         compose.onNodeWithText(post.content).assertIsDisplayed()
+        compose.onNodeWithText("回复 2").performClick()
         val authorAction = compose.onNodeWithContentDescription("只看楼主")
             .assertIsDisplayed().getUnclippedBoundsInRoot()
         val pageAction = compose.onNodeWithContentDescription("翻页，当前第 1 页，共 1 页")
             .assertIsDisplayed().getUnclippedBoundsInRoot()
-        val replyAction = compose.onNodeWithText("回复").assertIsDisplayed().getUnclippedBoundsInRoot()
+        val replyAction = compose.onNodeWithContentDescription("回复").assertIsDisplayed().getUnclippedBoundsInRoot()
         check(authorAction.right - authorAction.left >= 48.dp)
         check(pageAction.right - pageAction.left >= 48.dp)
-        check(pageAction.left >= authorAction.right && replyAction.left >= pageAction.right)
-        check(replyAction.right - authorAction.left < 240.dp) {
-            "Reading actions should float at intrinsic width, not occupy a full footer"
+        check(authorAction.left >= pageAction.right && replyAction.left >= authorAction.right)
+        check(replyAction.right - pageAction.left < 250.dp) {
+            "Expanded reading actions should remain compact"
         }
         compose.runOnUiThread {
             saveNativeScreenshot(compose.activity, "primary-post-320-light-normal.png")
@@ -391,6 +404,7 @@ class PrimaryScreensRenderTest {
         every { vm.favoriteError } returns MutableStateFlow<String?>(null)
         render { nav -> PostScreen(nav, vm, dark = false) }
         compose.onNodeWithText(post.content).assertIsDisplayed()
+        compose.onNodeWithText("回复 2").performClick()
         val authorAction = compose.onNodeWithContentDescription("只看楼主")
             .assertIsDisplayed().getUnclippedBoundsInRoot()
         val pageAction = compose.onNodeWithContentDescription("翻页，当前第 1 页，共 2 页")
@@ -398,8 +412,8 @@ class PrimaryScreensRenderTest {
         val replyAction = compose.onNodeWithText("回复").assertIsDisplayed().getUnclippedBoundsInRoot()
         check(authorAction.right - authorAction.left >= 48.dp)
         check(pageAction.right - pageAction.left >= 48.dp)
-        check(replyAction.right - authorAction.left < 240.dp)
-        check(replyAction.right > 700.dp) { "Reading actions should stay at the right edge" }
+        val dock = compose.onNodeWithTag("post-quick-actions").getUnclippedBoundsInRoot()
+        check(dock.left > 0.dp && dock.right < 780.dp) { "Reading actions must fit the reader width" }
         compose.runOnUiThread {
             saveNativeScreenshot(compose.activity, "primary-post-780x390-light.png")
         }
@@ -443,9 +457,10 @@ class PrimaryScreensRenderTest {
         every { vm.replySucceeded } returns MutableStateFlow(false)
         every { vm.favoriteError } returns MutableStateFlow<String?>(null)
         render(themeMode = "dark", fontScale = 2f) { nav -> PostScreen(nav, vm, dark = true) }
+        compose.onNodeWithText("回复 2").performClick()
         compose.onNodeWithContentDescription("只看楼主").assertIsDisplayed()
         compose.onNodeWithContentDescription("翻页，当前第 1 页，共 1 页").assertIsDisplayed()
-        compose.onNodeWithText("回复").assertIsDisplayed()
+        compose.onNodeWithContentDescription("回复").assertIsDisplayed()
         val shownDockTop = compose.onNodeWithTag("post-quick-actions").getUnclippedBoundsInRoot().top
         compose.runOnUiThread {
             saveNativeScreenshot(compose.activity, "primary-post-320x320-dark-2x.png")
@@ -495,6 +510,110 @@ class PrimaryScreensRenderTest {
         compose.onNodeWithTag("post-quick-actions").assertDoesNotExist()
         compose.onNodeWithText("用网页版打开").performClick()
         compose.onNodeWithTag("post-quick-actions").assertDoesNotExist()
+    }
+
+    @Test
+    @Config(sdk = [33], qualifiers = "w608dp-h860dp")
+    fun mediumReaderUsesNativeComfortLayoutAndBooksMarginsPreserveRichContent() {
+        val previewImage = File(compose.activity.cacheDir, "reader-v8-test-image.png")
+        val bitmap = Bitmap.createBitmap(640, 300, Bitmap.Config.ARGB_8888)
+        Canvas(bitmap).apply {
+            drawColor(Color.rgb(193, 219, 225))
+            drawRect(0f, 190f, 640f, 300f, Paint().apply { color = Color.rgb(88, 133, 120) })
+            drawCircle(465f, 80f, 42f, Paint().apply { color = Color.rgb(252, 223, 163) })
+        }
+        previewImage.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        bitmap.recycle()
+        val post = Post("reader-v8", "v8-1", "测试作者", "42",
+            "折叠屏展开以后，阅读应该更舒适", 1_790_540_000L, 0,
+            "这一段正文用于验证内屏竖屏阅读字号和行距。沿着河岸走过旧桥后，还能在山路的转角看见另一处标记。")
+        val reply = Post("reader-v8", "v8-2", "山间晚灯", "43", "", 1_790_540_600L, 1,
+            "我把几处路线的差别重新走了一遍，引用和图片放在正文之间，阅读时仍能分清层次。")
+        val later = Post("reader-v8", "v8-3", "北岸行舟", "44", "", 1_790_541_200L, 2,
+            "第二位回复补充了回程的小路：进入树林以后保持向西，路牌就在石阶下方。")
+        val favoriteFailure = MutableStateFlow<String?>(null)
+        val vm = mockk<PostViewModel>(relaxed = true)
+        every { vm.tid } returns "reader-v8"
+        every { vm.uiState } returns MutableStateFlow<PostUiState>(PostUiState.Success(
+            posts = listOf(post, reply, later), page = 1, totalPages = 1,
+            renderData = mapOf("v8-1" to PostRenderData(listOf(
+                PostBlock.Text(post.content),
+                PostBlock.Text("这段记录再补充一些上下文：起点在河边营地，先向北经过旧桥，再沿山脊折返。路线较长，正文会自然形成多行阅读区，便于检查字距、行距和每层之间的停顿。"),
+                PostBlock.Link("查看相关讨论", "https://bbs.nga.cn/"),
+                PostBlock.Quote(listOf(PostBlock.Text("引用仍可阅读")), refName = "示例用户", floor = 0)
+            ), emptyList(), emptyList()),
+                "v8-2" to PostRenderData(listOf(
+                    PostBlock.Quote(listOf(PostBlock.Text("沿着河岸走过旧桥后")), refName = "测试作者", floor = 0),
+                    PostBlock.Text(reply.content),
+                    PostBlock.Img(previewImage.toURI().toString())
+                ), emptyList(), emptyList()),
+                "v8-3" to PostRenderData(listOf(PostBlock.Text(later.content)), emptyList(), emptyList())
+            )
+        ))
+        every { vm.subject } returns MutableStateFlow(post.subject)
+        every { vm.isFavorite } returns MutableStateFlow(false)
+        every { vm.isLoadingMore } returns MutableStateFlow(false)
+        every { vm.loadError } returns MutableStateFlow<String?>(null)
+        every { vm.isRefreshing } returns MutableStateFlow(false)
+        every { vm.targetFloor } returns MutableStateFlow<Int?>(null)
+        every { vm.totalRows } returns MutableStateFlow(3)
+        every { vm.onlyAuthor } returns MutableStateFlow(false)
+        every { vm.replyTarget } returns MutableStateFlow(null)
+        every { vm.draftContent } returns MutableStateFlow("")
+        every { vm.watching } returns MutableStateFlow(false)
+        every { vm.ngaDomain } returns MutableStateFlow("bbs.nga.cn")
+        every { vm.webCookiesReady } returns MutableStateFlow(false)
+        every { vm.replying } returns MutableStateFlow(false)
+        every { vm.replyResult } returns MutableStateFlow<String?>(null)
+        every { vm.replySucceeded } returns MutableStateFlow(false)
+        every { vm.favoriteError } returns favoriteFailure
+        every { vm.dismissFavoriteError() } answers { favoriteFailure.value = null }
+        val mode = MutableStateFlow(ReadingDockMode.AUTO)
+        val root = mockk<RootViewModel>(relaxed = true)
+        every { root.readingDockMode } returns mode
+        every { root.readingTextScale } returns MutableStateFlow(1f)
+        render { nav ->
+            CompositionLocalProvider(LocalV8LayoutPolicy provides V8LayoutPolicy(
+                availableWidthDp = 608f, availableHeightDp = 860f,
+                mediumComfortTypography = true
+            )) {
+                PostScreen(nav, dark = false, viewModel = vm, root = root)
+            }
+        }
+        compose.onNodeWithText(post.content).assertIsDisplayed()
+        compose.onNodeWithText("查看相关讨论").assertIsDisplayed()
+        compose.onNodeWithText("回复 3").assertIsDisplayed()
+        compose.runOnUiThread {
+            saveNativeScreenshot(compose.activity, "v8-reader-medium-608x860-native.png")
+        }
+        compose.onNodeWithText("回复 3").performClick()
+        compose.onNodeWithContentDescription("0楼操作").performClick()
+        compose.mainClock.advanceTimeBy(8_000)
+        compose.onNodeWithContentDescription("收藏").assertIsDisplayed()
+        compose.onNodeWithText("复制内容").performClick()
+        compose.runOnUiThread { favoriteFailure.value = "网络失败" }
+        compose.onNodeWithText("收藏同步失败").assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(8_000)
+        compose.onNodeWithText("稍后处理").performClick()
+        compose.onNodeWithContentDescription("收藏").assertIsDisplayed()
+        compose.onNodeWithTag("post-reading-list").performScrollToIndex(1)
+        compose.onNodeWithText(reply.content).assertIsDisplayed()
+        compose.runOnUiThread {
+            saveNativeScreenshot(compose.activity, "v8-reader-medium-rich-608x860-native.png")
+        }
+        compose.onNodeWithTag("post-reading-list").performScrollToIndex(2)
+        compose.onNodeWithText(later.content).assertIsDisplayed()
+        compose.runOnUiThread { mode.value = ReadingDockMode.BOOKS }
+        compose.onNodeWithTag("post-quick-actions").assertDoesNotExist()
+        val blankEdges = compose.onAllNodes(hasContentDescription("轻触空白，显示阅读操作"))
+        check(blankEdges.fetchSemanticsNodes().size >= 2)
+        val leftEdge = blankEdges[0].getUnclippedBoundsInRoot()
+        val rightEdge = blankEdges[1].getUnclippedBoundsInRoot()
+        check(leftEdge.right <= 20.dp && rightEdge.left >= 588.dp)
+        compose.onNodeWithTag("post-reading-list").performScrollToIndex(0)
+        compose.onNodeWithText("查看相关讨论").assertIsDisplayed()
+        compose.onAllNodes(hasContentDescription("轻触空白，显示阅读操作"))[0].performClick()
+        compose.onNodeWithText("回复 3").assertIsDisplayed()
     }
 
     private fun render(

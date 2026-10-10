@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.qingyi5427.ngaqing.data.local.UserPreferences
 import com.qingyi5427.ngaqing.data.local.NgaDomains
+import com.qingyi5427.ngaqing.data.local.ReadingDockMode
 import com.qingyi5427.ngaqing.data.remote.LoginHelper
 import com.qingyi5427.ngaqing.data.repository.NgaRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -35,6 +36,8 @@ class SettingsViewModel @Inject constructor(
         prefs.readingLineSpacing.stateIn(viewModelScope, SharingStarted.Eagerly, 1f)
     val showSignatures: StateFlow<Boolean> =
         prefs.showSignatures.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val readingDockMode: StateFlow<ReadingDockMode> =
+        prefs.readingDockMode.stateIn(viewModelScope, SharingStarted.Eagerly, ReadingDockMode.AUTO)
     val accounts = prefs.accounts.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val activeUid = prefs.uid.stateIn(viewModelScope, SharingStarted.Eagerly, "")
 
@@ -52,6 +55,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setShowSignatures(value: Boolean) {
         viewModelScope.launch { prefs.setShowSignatures(value) }
+    }
+
+    fun setReadingDockMode(mode: ReadingDockMode) {
+        viewModelScope.launch { prefs.setReadingDockMode(mode) }
     }
 
     fun clearOfflineCache() {

@@ -8,6 +8,8 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import android.content.Context
+import android.view.accessibility.AccessibilityManager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -34,6 +36,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -44,6 +47,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -63,6 +67,7 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.FormatQuote
@@ -119,12 +124,12 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.foundation.text.KeyboardOptions
@@ -132,6 +137,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -141,14 +147,15 @@ import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import com.qingyi5427.ngaqing.data.model.Post
 import com.qingyi5427.ngaqing.data.local.NgaDomains
+import com.qingyi5427.ngaqing.data.local.ReadingDockMode
 import com.qingyi5427.ngaqing.data.remote.NgaInterceptor
 import com.qingyi5427.ngaqing.ui.Routes
-import com.qingyi5427.ngaqing.ui.chrome.rememberScrollDockState
+import com.qingyi5427.ngaqing.ui.adaptive.LocalV8LayoutPolicy
 import com.qingyi5427.ngaqing.ui.design.NgaBackdropScope
-import com.qingyi5427.ngaqing.ui.design.NgaGlassSurface
 import com.qingyi5427.ngaqing.ui.design.ngaBackdropSource
 import com.qingyi5427.ngaqing.ui.theme.LocalShowSignatures
 import com.qingyi5427.ngaqing.ui.gesture.SwipeBackContainer
+import com.qingyi5427.ngaqing.ui.root.RootViewModel
 import com.qingyi5427.ngaqing.ui.util.formatAuthorName
 import com.qingyi5427.ngaqing.ui.util.formatRelative
 import com.qingyi5427.ngaqing.ui.util.stripHtml
@@ -161,8 +168,36 @@ import kotlinx.coroutines.delay
 @Composable
 fun PostScreen(
     nav: NavHostController,
+    dark: Boolean,
     viewModel: PostViewModel = hiltViewModel(),
-    dark: Boolean
+    root: RootViewModel = hiltViewModel(),
+    isFocusMode: Boolean = false,
+    onToggleFocus: (() -> Unit)? = null,
+    onShowBoards: (() -> Unit)? = null
+) {
+    val readingDockMode by root.readingDockMode.collectAsStateWithLifecycle()
+    val readingTextScale by root.readingTextScale.collectAsStateWithLifecycle()
+    PostScreenContent(nav, viewModel, dark, readingDockMode, readingTextScale,
+        isFocusMode, onToggleFocus, onShowBoards)
+}
+
+/** Compatibility entry used by existing isolated render tests without a Hilt root VM. */
+@Composable
+fun PostScreen(nav: NavHostController, viewModel: PostViewModel, dark: Boolean) {
+    PostScreenContent(nav, viewModel, dark, ReadingDockMode.AUTO, 1f, false, null, null)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PostScreenContent(
+    nav: NavHostController,
+    viewModel: PostViewModel,
+    dark: Boolean,
+    readingDockMode: ReadingDockMode,
+    readingTextScale: Float,
+    isFocusMode: Boolean,
+    onToggleFocus: (() -> Unit)?,
+    onShowBoards: (() -> Unit)?
 ) {
     val s by viewModel.uiState.collectAsStateWithLifecycle()
     val subject by viewModel.subject.collectAsStateWithLifecycle()
@@ -183,12 +218,30 @@ fun PostScreen(
     val viewerUrl = remember { mutableStateOf<String?>(null) }
     val webFallback = rememberSaveable { mutableStateOf(false) }
     val listState = rememberLazyListState()
-    val dockState = rememberScrollDockState()
+    val dockState = rememberReaderDockState(viewModel.tid)
     val ctx = LocalContext.current
+    val layoutPolicy = LocalV8LayoutPolicy.current
+    val mediumReading = layoutPolicy.mediumComfortTypography
+    val accessibilityManager = remember(ctx) {
+        ctx.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
+    }
+    var touchExploration by remember(accessibilityManager) {
+        mutableStateOf(accessibilityManager?.isTouchExplorationEnabled == true)
+    }
+    DisposableEffect(accessibilityManager) {
+        val listener = AccessibilityManager.TouchExplorationStateChangeListener { enabled ->
+            touchExploration = enabled
+        }
+        accessibilityManager?.addTouchExplorationStateChangeListener(listener)
+        onDispose { accessibilityManager?.removeTouchExplorationStateChangeListener(listener) }
+    }
 
     var replyOpen by rememberSaveable { mutableStateOf(false) }
     var replyText by rememberSaveable { mutableStateOf("") }
     var menuOpen by remember { mutableStateOf(false) }
+    var dockHasFocus by remember { mutableStateOf(false) }
+    var dockPressed by remember { mutableStateOf(false) }
+    var openFloorMenuPid by remember { mutableStateOf<String?>(null) }
     var jumpOpen by remember { mutableStateOf(false) }
     var jumpText by remember { mutableStateOf("") }
     var pagePickerOpen by remember { mutableStateOf(false) }
@@ -197,6 +250,20 @@ fun PostScreen(
     val replyResult by viewModel.replyResult.collectAsStateWithLifecycle()
     val replySucceeded by viewModel.replySucceeded.collectAsStateWithLifecycle()
     val favoriteError by viewModel.favoriteError.collectAsStateWithLifecycle()
+    val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    val dockBlocked = replyOpen || pagePickerOpen || jumpOpen || menuOpen ||
+        openFloorMenuPid != null || favoriteError != null || dockPressed ||
+        viewerUrl.value != null || imeVisible || dockHasFocus || touchExploration
+
+    LaunchedEffect(readingDockMode) { dockState.updateMode(readingDockMode) }
+    LaunchedEffect(dockState.stage, dockState.timerEpoch, dockBlocked) {
+        if (dockBlocked) return@LaunchedEffect
+        when (dockState.stage) {
+            ReaderDockStage.EXPANDED -> dockState.idleAfter(2800)
+            ReaderDockStage.PEEK -> dockState.idleAfter(4500)
+            ReaderDockStage.HIDDEN -> Unit
+        }
+    }
 
     LaunchedEffect(webFallback.value, ngaDomain) {
         if (webFallback.value) viewModel.prepareWebCookies()
@@ -278,7 +345,6 @@ fun PostScreen(
             Modifier.fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
                 .navigationBarsPadding()
-                .nestedScroll(dockState.nestedScrollConnection)
         ) {
         Column(Modifier.fillMaxSize()) {
         com.qingyi5427.ngaqing.ui.chrome.AppTopBar(
@@ -292,6 +358,16 @@ fun PostScreen(
                 }
             },
             actions = {
+                if (onShowBoards != null && layoutPolicy.readerTwoPane) {
+                    IconButton(onClick = onShowBoards) {
+                        Icon(Icons.Filled.Menu, contentDescription = "打开版块导航")
+                    }
+                }
+                if (onToggleFocus != null && layoutPolicy.readerTwoPane) {
+                    TextButton(onClick = onToggleFocus, modifier = Modifier.heightIn(min = 48.dp)) {
+                        Text(if (isFocusMode) "退出专注" else "专注阅读")
+                    }
+                }
                 IconButton(onClick = { viewModel.toggleFavorite() }) {
                     Icon(
                         if (fav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
@@ -304,6 +380,33 @@ fun PostScreen(
                         Icon(Icons.Filled.MoreVert, contentDescription = "更多")
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("回复帖子") },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.Reply, null) },
+                            onClick = {
+                                menuOpen = false
+                                viewModel.setReplyTarget(null)
+                                replyText = savedDraft
+                                replyOpen = true
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("翻页") },
+                            leadingIcon = { Icon(Icons.Filled.SwapVert, null) },
+                            onClick = {
+                                menuOpen = false
+                                pageText = viewModel.page.value.toString()
+                                pagePickerOpen = true
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("显示阅读操作") },
+                            leadingIcon = { Icon(Icons.Filled.ExpandLess, null) },
+                            onClick = {
+                                menuOpen = false
+                                dockState.expand()
+                            }
+                        )
                         DropdownMenuItem(
                             text = { Text(if (onlyAuthor) "查看全部回复" else "只看楼主") },
                             leadingIcon = { Icon(Icons.Filled.PersonSearch, null) },
@@ -405,9 +508,10 @@ fun PostScreen(
                     val posts = cur.posts
                     LazyColumn(
                         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)
+                            .nestedScroll(dockState.nestedScrollConnection)
                             .testTag("post-reading-list"),
                         state = listState,
-                        contentPadding = PaddingValues(bottom = 76.dp)
+                        contentPadding = PaddingValues(bottom = 72.dp)
                     ) {
                         if (cur.fromCache) {
                             item(key = "offline-banner", contentType = "offline-banner") {
@@ -426,9 +530,13 @@ fun PostScreen(
                             key = { it.pid.ifBlank { it.lou } },
                             contentType = { "post-floor" }
                         ) { post ->
+                            Box(Modifier.fillMaxWidth()) {
+                            Box(Modifier.align(Alignment.Center).widthIn(max = 720.dp).fillMaxWidth()) {
                             PostCard(
                                 post = post,
                                 renderData = cur.renderData[post.renderKey()],
+                                mediumReading = mediumReading,
+                                readingTextScale = readingTextScale,
                                 onImage = { viewerUrl.value = it },
                                 onJumpToFloor = { floor ->
                                     val idx = posts.indexOfFirst { it.lou == floor }
@@ -451,8 +559,24 @@ fun PostScreen(
                                     } else {
                                         Toast.makeText(ctx, "匿名用户没有公开主页", Toast.LENGTH_SHORT).show()
                                     }
+                                },
+                                onFloorMenuChanged = { open ->
+                                    if (open) openFloorMenuPid = post.pid
+                                    else if (openFloorMenuPid == post.pid) openFloorMenuPid = null
                                 }
                             )
+                            }
+                            if (readingDockMode == ReadingDockMode.BOOKS) {
+                                Box(Modifier.matchParentSize()) {
+                                    Box(Modifier.align(Alignment.CenterStart).width(20.dp).fillMaxHeight()
+                                        .clickable { dockState.onBlankMarginTap() }
+                                        .semantics { contentDescription = "轻触空白，显示阅读操作" })
+                                    Box(Modifier.align(Alignment.CenterEnd).width(20.dp).fillMaxHeight()
+                                        .clickable { dockState.onBlankMarginTap() }
+                                        .semantics { contentDescription = "轻触空白，显示阅读操作" })
+                                }
+                            }
+                            }
                             HorizontalDivider(
                                 color = MaterialTheme.colorScheme.outlineVariant,
                                 modifier = Modifier.padding(horizontal = 20.dp)
@@ -512,16 +636,25 @@ fun PostScreen(
                 }
             }
             AnimatedVisibility(
-                visible = dockState.visible,
-                modifier = Modifier.align(Alignment.BottomEnd)
-                    .padding(end = 16.dp, bottom = 14.dp),
+                visible = dockState.stage != ReaderDockStage.HIDDEN && !replyOpen &&
+                    !pagePickerOpen && !jumpOpen && viewerUrl.value == null && !imeVisible,
+                modifier = Modifier.align(Alignment.BottomCenter)
+                    .fillMaxWidth().padding(horizontal = 8.dp, vertical = 12.dp),
                 enter = fadeIn(tween(180)) + slideInVertically(tween(180)) { it / 2 },
                 exit = fadeOut(tween(180)) + slideOutVertically(tween(180)) { it / 2 }
             ) {
-            PostQuickActions(
+            BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            val localReaderWidthDp = maxWidth.value
+            ReaderDock(
+                stage = dockState.stage,
+                replyCount = totalRows,
                 currentPage = readingPage,
                 totalPages = readingState.totalPages,
+                isFavorite = fav,
                 onlyAuthor = onlyAuthor,
+                onExpand = dockState::expand,
+                onCollapse = dockState::peek,
+                onFavorite = viewModel::toggleFavorite,
                 onReply = {
                     viewModel.setReplyTarget(null)
                     replyText = savedDraft
@@ -531,10 +664,21 @@ fun PostScreen(
                     pageText = readingPage.toString()
                     pagePickerOpen = true
                 },
+                onJump = {
+                    jumpText = ""
+                    jumpOpen = true
+                },
                 onOnlyAuthor = {
                     viewModel.toggleOnlyAuthor()
-                }
+                },
+                onFocusChanged = { dockHasFocus = it },
+                onInteraction = dockState::resetIdleTimer,
+                onPressChanged = { dockPressed = it },
+                compact = localReaderWidthDp < 380f ||
+                    LocalDensity.current.fontScale >= 1.5f,
+                availableWidthDp = localReaderWidthDp
             )
+            }
             }
         }
         }
@@ -760,99 +904,50 @@ internal fun compactPageLabel(currentPage: Int, totalPages: Int, largeText: Bool
     }
 }
 
-@Composable
-private fun PostQuickActions(
-    currentPage: Int,
-    totalPages: Int,
-    onlyAuthor: Boolean,
-    onReply: () -> Unit,
-    onPage: () -> Unit,
-    onOnlyAuthor: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val largeText = LocalDensity.current.fontScale >= 1.5f
-    val pageLabel = compactPageLabel(currentPage, totalPages, largeText)
-    NgaGlassSurface(modifier = modifier.testTag("post-quick-actions"), shape = RoundedCornerShape(16.dp)) {
-        Row(
-                Modifier.padding(5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                IconButton(onClick = onOnlyAuthor, modifier = Modifier.size(48.dp)) {
-                    Icon(
-                        Icons.Filled.PersonSearch,
-                        contentDescription = if (onlyAuthor) "查看全部回复" else "只看楼主",
-                        tint = if (onlyAuthor) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .widthIn(min = 48.dp, max = 86.dp)
-                        .height(48.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(onClick = onPage)
-                        .semantics {
-                            contentDescription = "翻页，当前第 $currentPage 页，共 $totalPages 页"
-                            role = Role.Button
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        pageLabel,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        modifier = Modifier.padding(horizontal = 6.dp)
-                    )
-                }
-                Surface(
-                    onClick = onReply,
-                    shape = RoundedCornerShape(10.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                    modifier = Modifier.heightIn(min = 48.dp)
-                ) {
-                    Row(
-                        Modifier.padding(horizontal = 11.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.Reply, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Text("回复", style = MaterialTheme.typography.labelMedium)
-                    }
-                }
-            }
-    }
-}
-
 /** 连续讨论流中的单个楼层：标题、作者、正文和楼中楼保持清晰但克制的层级。 */
 @Composable
 private fun PostCard(
     post: Post,
     renderData: PostRenderData?,
+    mediumReading: Boolean,
+    readingTextScale: Float,
     onImage: (String) -> Unit,
     onJumpToFloor: (Int) -> Unit,
     onReply: (Post, Boolean) -> Unit,
-    onOpenUser: (Post) -> Unit
+    onOpenUser: (Post) -> Unit,
+    onFloorMenuChanged: (Boolean) -> Unit
 ) {
     val blocks = renderData?.body.orEmpty()
     val sigBlocks = renderData?.signature.orEmpty()
     val showSignatures = LocalShowSignatures.current
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    val baseBody = MaterialTheme.typography.bodyLarge
+    val mainBody = post.lou == 0
+    val bodyStyle = baseBody.copy(
+        fontSize = baseBody.fontSize * if (mainBody && mediumReading) 1.125f else 1f,
+        lineHeight = baseBody.lineHeight * when {
+            mainBody && mediumReading -> 33f / 26f
+            mainBody -> 29f / 26f
+            else -> 1f
+        }
+    )
     var floorMenuOpen by remember(post.pid) { mutableStateOf(false) }
+    LaunchedEffect(floorMenuOpen) { onFloorMenuChanged(floorMenuOpen) }
+    DisposableEffect(post.pid) { onDispose { onFloorMenuChanged(false) } }
 
     Column(
         Modifier.fillMaxWidth()
             .background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = 20.dp, vertical = if (post.lou == 0) 24.dp else 20.dp)
+            .padding(horizontal = if (mediumReading) 24.dp else 20.dp, vertical = if (post.lou == 0) 24.dp else 20.dp)
     ) {
         if (post.lou == 0) {
             Text(
                 post.subject.ifBlank { "（无标题）" },
-                style = MaterialTheme.typography.headlineSmall,
+                style = MaterialTheme.typography.headlineLarge.copy(
+                    fontSize = (if (mediumReading) 32.sp else 28.sp) * readingTextScale,
+                    lineHeight = (if (mediumReading) 40.sp else 36.sp) * readingTextScale
+                ),
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
             )
@@ -960,14 +1055,14 @@ private fun PostCard(
         }
         Spacer(Modifier.height(18.dp))
         // 正文
-        blocks.forEach { block -> RenderBlock(block, onImage, onJumpToFloor) }
+        blocks.forEach { block -> RenderBlock(block, onImage, onJumpToFloor, bodyStyle) }
         // 签名
         if (showSignatures && sigBlocks.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
             Spacer(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outlineVariant))
             Spacer(Modifier.height(6.dp))
             Column {
-                sigBlocks.forEach { block -> RenderBlock(block, onImage, onJumpToFloor) }
+                sigBlocks.forEach { block -> RenderBlock(block, onImage, onJumpToFloor, baseBody) }
             }
         }
         if (post.comments.isNotEmpty()) {
@@ -990,7 +1085,7 @@ private fun PostCard(
                             color = MaterialTheme.colorScheme.primary
                         )
                         renderData?.comments?.getOrNull(index).orEmpty().forEach {
-                            RenderBlock(it, onImage, onJumpToFloor)
+                            RenderBlock(it, onImage, onJumpToFloor, baseBody)
                         }
                         if (index != post.comments.lastIndex) {
                             Spacer(Modifier.height(8.dp))
@@ -1051,14 +1146,15 @@ private enum class ContentImageState { Loading, Success, Error }
 private fun RenderBlock(
     block: PostBlock,
     onImage: (String) -> Unit,
-    onJumpToFloor: (Int) -> Unit
+    onJumpToFloor: (Int) -> Unit,
+    bodyStyle: TextStyle
 ) {
     when (block) {
         is PostBlock.Text -> {
             if (block.text.isBlank()) return
             Text(
                 block.text,
-                style = MaterialTheme.typography.bodyLarge,
+                style = bodyStyle,
                 fontWeight = if (block.bold) FontWeight.Bold else FontWeight.Normal,
                 textDecoration = if (block.strike) TextDecoration.LineThrough else TextDecoration.None,
                 color = MaterialTheme.colorScheme.onSurface
@@ -1095,7 +1191,7 @@ private fun RenderBlock(
                         Toast.makeText(context, "找不到可打开链接的应用", Toast.LENGTH_SHORT).show()
                     }
                 },
-                style = MaterialTheme.typography.bodyLarge,
+                style = bodyStyle,
                 color = MaterialTheme.colorScheme.primary,
                 textDecoration = TextDecoration.Underline
             )
@@ -1332,7 +1428,7 @@ private fun RenderBlock(
                             modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 11.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            block.blocks.forEach { RenderBlock(it, onImage, onJumpToFloor) }
+                            block.blocks.forEach { RenderBlock(it, onImage, onJumpToFloor, bodyStyle) }
                         }
                     }
                 }
@@ -1408,7 +1504,7 @@ private fun RenderBlock(
                         fontWeight = FontWeight.Medium
                     )
                     Spacer(Modifier.height(4.dp))
-                    block.blocks.forEach { RenderBlock(it, onImage, onJumpToFloor) }
+                    block.blocks.forEach { RenderBlock(it, onImage, onJumpToFloor, bodyStyle) }
                 }
             }
         }
