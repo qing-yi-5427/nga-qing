@@ -3,6 +3,7 @@ package com.qingyi5427.ngaqing.ui.root
 import com.qingyi5427.ngaqing.data.local.AccountDisplay
 import com.qingyi5427.ngaqing.data.local.RequestPreferences
 import com.qingyi5427.ngaqing.data.local.UserPreferences
+import com.qingyi5427.ngaqing.data.local.ReadingDockMode
 import com.qingyi5427.ngaqing.data.model.UserProfile
 import com.qingyi5427.ngaqing.data.repository.NgaRepository
 import io.mockk.coEvery
@@ -47,6 +48,7 @@ class RootProfileTest {
         every { prefs.blacklistKeywords } returns flowOf(emptySet())
         every { prefs.readingTextScale } returns flowOf(1f)
         every { prefs.readingLineSpacing } returns flowOf(1f)
+        every { prefs.readingDockMode } returns flowOf(ReadingDockMode.AUTO)
         every { prefs.showSignatures } returns flowOf(true)
         coEvery { prefs.requestPreferences() } coAnswers { session.value }
         coEvery { repo.isSessionCurrent(any()) } coAnswers {

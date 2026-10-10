@@ -197,7 +197,7 @@ class SecondaryScreensRenderTest {
         render(mode = "dark", fontScale = 1.3f) { ProfileScreen(it, root = model) }
         compose.onNodeWithText("UID 123456").assertIsDisplayed()
         screenshot("secondary-profile-320-dark-identity.png")
-        compose.onNodeWithText("消息与关注").assertIsDisplayed()
+        compose.onNodeWithText("消息与关注").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("设置与阅读偏好").performScrollTo().assertIsDisplayed()
         screenshot("secondary-profile-320-dark-large-font.png")
     }
@@ -245,14 +245,22 @@ class SecondaryScreensRenderTest {
             "${imageFailure.get()?.javaClass?.simpleName}: ${imageFailure.get()?.message}",
             runCatching { compose.onNodeWithTag("profile-avatar-loaded").assertExists(); true }
                 .getOrDefault(false))
-        val image = compose.runOnUiThread { compose.activity.window.decorView.drawToBitmap() }
-        val visibleOrangePixel = (0 until image.height / 2).any { y ->
-            (0 until image.width).any { x ->
+        val avatarBounds = compose.onNodeWithTag("profile-avatar-loaded")
+            .fetchSemanticsNode().boundsInRoot
+        val image = compose.runOnUiThread {
+            compose.activity.findViewById<View>(android.R.id.content).drawToBitmap()
+        }
+        val left = avatarBounds.left.toInt().coerceIn(0, image.width)
+        val top = avatarBounds.top.toInt().coerceIn(0, image.height)
+        val right = kotlin.math.ceil(avatarBounds.right).toInt().coerceIn(left, image.width)
+        val bottom = kotlin.math.ceil(avatarBounds.bottom).toInt().coerceIn(top, image.height)
+        val visibleOrangePixel = (top until bottom).any { y ->
+            (left until right).any { x ->
                 val pixel = image.getPixel(x, y)
                 Color.red(pixel) > 190 && Color.green(pixel) in 65..180 && Color.blue(pixel) < 80
             }
         }
-        assertTrue("Loaded avatar must be visible in the native frame", visibleOrangePixel)
+        assertTrue("Loaded avatar must be visible in its native frame bounds: $avatarBounds", visibleOrangePixel)
     }
 
     @Test

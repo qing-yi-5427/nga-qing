@@ -20,10 +20,13 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.border
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -53,12 +56,15 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
 import com.qingyi5427.ngaqing.ui.Routes
+import com.qingyi5427.ngaqing.ui.adaptive.LocalV8LayoutPolicy
+import com.qingyi5427.ngaqing.ui.adaptive.decideV8LayoutPolicy
 import com.qingyi5427.ngaqing.ui.chrome.AppBottomBar
-import com.qingyi5427.ngaqing.ui.chrome.AppTopBar
+import com.qingyi5427.ngaqing.ui.chrome.EditorialRootTopBar
 import com.qingyi5427.ngaqing.ui.chrome.LocalRootNavigationRail
 import com.qingyi5427.ngaqing.ui.chrome.rememberScrollDockState
 import com.qingyi5427.ngaqing.ui.design.NgaBackdropScope
@@ -81,6 +87,7 @@ fun ProfileScreen(
         if (display.uid.isNotBlank()) root.refreshOwnProfile()
     }
     val hasDock = !LocalRootNavigationRail.current
+    val headerMargin = if (LocalV8LayoutPolicy.current.availableWidthDp >= 600f) 34.dp else 20.dp
     val dockState = rememberScrollDockState()
     val dockClearance = 96.dp + with(LocalDensity.current) {
         WindowInsets.navigationBars.getBottom(this).toDp()
@@ -90,25 +97,38 @@ fun ProfileScreen(
         .nestedScroll(dockState.nestedScrollConnection)
         .then(if (hasDock) Modifier else Modifier.navigationBarsPadding())) {
     Column(Modifier.fillMaxSize()) {
-        AppTopBar("我的")
+        EditorialRootTopBar(nav, Routes.PROFILE, "我的空间",
+            Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                .padding(horizontal = headerMargin))
         BoxWithConstraints(
             Modifier.weight(1f).fillMaxWidth()
-                .testTag("profile-scroll")
-                .ngaBackdropSource()
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
-                .verticalScroll(rememberScrollState())
         ) {
-            if (maxWidth >= 600.dp) {
-                Row(Modifier.fillMaxWidth().padding(bottom = if (hasDock) dockClearance else 24.dp)) {
-                    ProfileIdentity(display, profileLoad, { root.refreshOwnProfile() }, onAvatarLoadError,
-                        Modifier.weight(0.38f).heightIn(min = 450.dp))
-                    ProfileEntries(nav, Modifier.weight(0.62f))
-                }
-            } else {
-                Column(Modifier.padding(bottom = if (hasDock) dockClearance else 24.dp)) {
-                    ProfileIdentity(display, profileLoad, { root.refreshOwnProfile() }, onAvatarLoadError,
-                        Modifier.fillMaxWidth())
-                    ProfileEntries(nav, Modifier.fillMaxWidth())
+            val fontScale = LocalDensity.current.fontScale
+            val margin = if (maxWidth >= 600.dp) 34.dp else 20.dp
+            val suppliedPolicy = LocalV8LayoutPolicy.current
+            val policy = if (suppliedPolicy.availableWidthDp > 0f) suppliedPolicy
+                else decideV8LayoutPolicy(maxWidth.value, maxHeight.value, fontScale)
+            val sideBySide = policy.favoriteColumns == 2 && !policy.compactHeight && maxHeight >= 480.dp
+            Box(Modifier.fillMaxSize().testTag("profile-scroll")
+                .ngaBackdropSource().verticalScroll(rememberScrollState()),
+                contentAlignment = Alignment.TopCenter) {
+                Column(Modifier.widthIn(max = 1120.dp).fillMaxWidth()
+                    .padding(horizontal = margin)
+                    .padding(bottom = if (hasDock) dockClearance else 24.dp)) {
+                    ProfileMasthead()
+                    if (sideBySide) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                            ProfileIdentity(display, profileLoad, { root.refreshOwnProfile() },
+                                onAvatarLoadError, Modifier.weight(0.39f).heightIn(min = 260.dp))
+                            ProfileEntries(nav, Modifier.weight(0.61f))
+                        }
+                    } else {
+                        ProfileIdentity(display, profileLoad, { root.refreshOwnProfile() },
+                            onAvatarLoadError, Modifier.fillMaxWidth())
+                        Spacer(Modifier.height(18.dp))
+                        ProfileEntries(nav, Modifier.fillMaxWidth())
+                    }
                 }
             }
         }
@@ -117,6 +137,25 @@ fun ProfileScreen(
         AppBottomBar(nav, Routes.PROFILE, visible = dockState.visible)
     }
     }
+    }
+}
+
+@Composable
+private fun ProfileMasthead() {
+    Column(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 24.dp)) {
+        Text("ACCOUNT  ·  NGA QING", style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold, letterSpacing = 1.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(7.dp))
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text("我的", style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onBackground)
+            Text(".", style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.primary)
+        }
+        Spacer(Modifier.height(7.dp))
+        Text("账号、阅读记录与社区消息", style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -132,14 +171,18 @@ private fun ProfileIdentity(
     val uid = display.uid
     var avatarLoaded by remember(display.avatar) { mutableStateOf(false) }
     var avatarFailed by remember(display.avatar) { mutableStateOf(false) }
-    Column(modifier.background(MaterialTheme.colorScheme.surface)
-        .padding(horizontal = 24.dp, vertical = 28.dp)) {
-        Text("个人空间", style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.height(18.dp))
+    val cardShape = RoundedCornerShape(16.dp)
+    Column(modifier.testTag("profile-identity")
+        .background(MaterialTheme.colorScheme.surface, cardShape)
+        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, cardShape)
+        .padding(horizontal = 20.dp, vertical = 22.dp)) {
+        Text("个人空间", style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(20.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
-                Modifier.size(68.dp).clip(CircleShape)
+                Modifier.size(64.dp).clip(CircleShape)
                     .background(MaterialTheme.colorScheme.primaryContainer),
                 contentAlignment = Alignment.Center
             ) {
@@ -167,7 +210,7 @@ private fun ProfileIdentity(
                     )
                 }
             }
-            Column(Modifier.weight(1f).padding(start = 18.dp)) {
+            Column(Modifier.weight(1f).padding(start = 16.dp)) {
                 Text(name.ifBlank { "NGA 用户" }, style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.SemiBold, maxLines = 2,
                     overflow = TextOverflow.Ellipsis)
@@ -184,31 +227,44 @@ private fun ProfileIdentity(
                 }
             }
         }
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(22.dp))
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Spacer(Modifier.height(14.dp))
+        Text("账号切换与退出可在设置中管理。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
 private fun ProfileEntries(nav: NavHostController, modifier: Modifier) {
-    Column(modifier.background(MaterialTheme.colorScheme.surface)
-        .padding(horizontal = 24.dp, vertical = 24.dp)) {
-                Text("我的内容", style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(10.dp))
-                ProfileRow("消息与关注", "提醒、私信和关注主题", Icons.Outlined.Notifications) {
-                    nav.navigate(Routes.COMMUNITY)
-                }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                ProfileRow("浏览历史", "接着阅读看过的帖子", Icons.Outlined.History) {
-                    nav.navigate(Routes.HISTORY)
-                }
-                Spacer(Modifier.height(28.dp))
-                Text("应用", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(10.dp))
-                ProfileRow("设置与阅读偏好", "账号、外观与内容过滤", Icons.Filled.Settings) {
-                    nav.navigate(Routes.SETTINGS)
-                }
+    Column(modifier.testTag("profile-entries")) {
+        Text("我的内容", style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(bottom = 11.dp))
+        val cardShape = RoundedCornerShape(16.dp)
+        Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, cardShape)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, cardShape)
+            .padding(horizontal = 15.dp)) {
+            ProfileRow("消息与关注", "提醒、私信和关注主题", Icons.Outlined.Notifications) {
+                nav.navigate(Routes.COMMUNITY)
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            ProfileRow("浏览历史", "接着阅读看过的帖子", Icons.Outlined.History) {
+                nav.navigate(Routes.HISTORY)
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+        Text("应用", style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(bottom = 11.dp))
+        Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, cardShape)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, cardShape)
+            .padding(horizontal = 15.dp)) {
+            ProfileRow("设置与阅读偏好", "账号、外观与内容过滤", Icons.Filled.Settings) {
+                nav.navigate(Routes.SETTINGS)
+            }
+        }
     }
 }
 
@@ -216,11 +272,15 @@ private fun ProfileEntries(nav: NavHostController, modifier: Modifier) {
 private fun ProfileRow(label: String, detail: String, icon: ImageVector, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().heightIn(min = 76.dp).clickable(onClick = onClick)
-            .padding(vertical = 12.dp),
+            .padding(vertical = 12.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Box(Modifier.size(40.dp).background(MaterialTheme.colorScheme.primaryContainer,
+            RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp))
+        }
         Column(Modifier.weight(1f)) {
             Text(label, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
             Text(detail, style = MaterialTheme.typography.bodySmall,
