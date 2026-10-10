@@ -1,12 +1,14 @@
 # NGA 清漪 V8 交接（2026-10-10）
 
-本轮代码位于隔离工作树 `G:\AI\coding\10-nga\NgaClient-ui-v8`、分支 `feat/ui-v8-adaptive`。原工作树 `G:\AI\coding\10-nga\NgaClient` 保留，不在本轮修改或合并。视觉基准是同级 `NGA_Qing_UI_V8_Agent_Kit/nga-qing-ios-v8-inner-portrait.html` 及其 PNG；实施映射见 `docs/ui-v8-audit.md`，设备与场景记录见 `docs/ui-v8-qa/validation.md`。
+V8 研发在隔离工作树 `G:\AI\coding\10-nga\NgaClient-ui-v8`、分支 `feat/ui-v8-adaptive` 完成；原 `G:\AI\coding\10-nga\NgaClient` 工作树中的未提交修改一直保留。视觉基准是同级 `NGA_Qing_UI_V8_Agent_Kit/nga-qing-ios-v8-inner-portrait.html` 及其 PNG；实施映射见 `docs/ui-v8-audit.md`，设备与场景记录见 `docs/ui-v8-qa/validation.md`。
+
+**2026-10-10 交付进展：**用户已在实体设备上试用 1.2.2，确认帖子头像显示并表示试用通过，授权合并并推送到自己的仓库。开发侧此前没有连接该设备；以下旧 QA 记录的「未实机验证」指当时的独立验证范围，不抹去该历史边界，也不将用户试用写成开发侧测试。Git 合并及推送结果应以远端 `main` 为准。
 
 ## 1.2.2 当前增量（2026-10-10）
 
-生产源码至提交 `48e02a403d681b3c82d19cd838608397a0dc8f45`：修复阅读回复左侧空列、常逛版块卡内容居中、搜索框双层边缘、根 Tab 从版块子页返回发现，并换为与 V8 一致的蓝白 N 气泡图标。头像数据层处理多头像值和旧图域名；测试图片与空/错误占位通过，但实际 NGA 远端头像尚待在线具体样本。原单 `NavController`、阅读锚点、回复草稿与网页直渲染边界未改。
+生产源码至提交 `48e02a403d681b3c82d19cd838608397a0dc8f45`：修复阅读回复左侧空列、常逛版块卡内容居中、搜索框双层边缘、根 Tab 从版块子页返回发现，并换为与 V8 一致的蓝白 N 气泡图标。头像数据层处理多头像值和旧图域名；开发侧当时通过了本地图片与空/错误占位测试，未拿到 NGA 在线具体样本，用户随后在实体设备上确认头像显示。原单 `NavController`、阅读锚点、回复草稿与网页直渲染边界未改。
 
-QA 全量为 50 suites、228 tests，0 失败/错误/跳过；Lint 0 error、23 warning。窄底栏/宽侧栏根 Tab 真 `NavHostController` 回归 4/4 通过。正式 1.2.2/code7 R8 包在 `G:\AI\coding\10-nga\V8_Release\nga-qing-1.2.2-v8.apk`，SHA-256 `42C393A710B5E61DFF352F19244FED0C1D5DDC1D7756CDC0CDD478EB94C4830D`；同目录有 `.sha256` 和 `build-verification-1.2.2.md`。旧 1.2.0/1.2.1 包保留。本轮设备未连接，用户已将实体操作延期，因此 1.2.2 尚无保数据安装与真实界面验收。下文是 1.2.0 的历史交接快照。
+QA 全量为 50 suites、228 tests，0 失败/错误/跳过；Lint 0 error、23 warning。窄底栏/宽侧栏根 Tab 真 `NavHostController` 回归 4/4 通过。正式 1.2.2/code7 R8 包在 `G:\AI\coding\10-nga\V8_Release\nga-qing-1.2.2-v8.apk`，SHA-256 `42C393A710B5E61DFF352F19244FED0C1D5DDC1D7756CDC0CDD478EB94C4830D`；同目录有 `.sha256` 和 `build-verification-1.2.2.md`。旧 1.2.0/1.2.1 包保留。开发侧的 1.2.2 检查没有连接设备；用户随后完成实体试用并确认头像显示。保数据安装、设备包摘要和完整场景矩阵未由开发侧独立复核。下文是 1.2.0 的历史交接快照。
 
 ## 已实现
 
@@ -25,6 +27,6 @@ Compose 原生截图在 `app/build/outputs/ui-evidence/`：`v8-discover-innerL-h
 
 六种窗口预设的发现、收藏、主题、阅读四页 Compose 模拟共 24 图，生成路径和 dp 尺寸见 `docs/ui-v8-window-presets.md`。它们是本地测试数据与假定密度下的布局证据，不是实体折叠屏测试。
 
-## 接下来
+## 1.2.0 历史交接结论
 
-正式 APK `G:\AI\coding\10-nga\V8_Release\nga-qing-1.2.0-v8.apk`（SHA-256 `221A7F288157340E5CD91E291D5D8B0B7789F76EA405745058470B61DE6B2C45`）已完成 R8/资源压缩、版本/权限/签名核验和保数据实体安装；设备拉回的 `base.apk` 摘要一致，冷启、四入口与 #5 楼续读通过。QA 用独立纯 Java helper 测试容器操作 Release，本体没有注入测试框架。系统拒绝 `wm size/density` 和字体设置覆盖，六预设仅能用本地 Compose 模拟，真实折叠机尚不可测。不发帖、回帖或私信，不卸载或清除数据。当前不合并、不推送、不发布 GitHub Release。
+正式 APK `G:\AI\coding\10-nga\V8_Release\nga-qing-1.2.0-v8.apk`（SHA-256 `221A7F288157340E5CD91E291D5D8B0B7789F76EA405745058470B61DE6B2C45`）当时已完成 R8/资源压缩、版本/权限/签名核验和保数据实体安装；设备拉回的 `base.apk` 摘要一致，冷启、四入口与 #5 楼续读通过。QA 用独立纯 Java helper 测试容器操作 Release，本体没有注入测试框架。系统拒绝 `wm size/density` 和字体设置覆盖，六预设仅能用本地 Compose 模拟，真实折叠机当时尚不可测。该次 QA 未发帖、回帖或私信，未卸载或清除数据。当时决定暂不合并、推送或发布 GitHub Release；1.2.2 用户试用通过后，合并与推送已获授权，GitHub Release 不在本次范围。

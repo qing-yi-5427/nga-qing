@@ -21,4 +21,6 @@
 
 本轮 `adb devices -l` 返回空列表，随后只读 window 查询因 ADB daemon 未能连接而停止。没有要求用户解锁、没有改系统设置，也没有安装、卸载、清空主包或执行 `connectedAndroidTest`/Macrobenchmark 安装链。1.2.2 实体 GPU、真实系统键盘、在线 NGA 头像加载和实体折叠开合均待以后有设备时核验；此前 1.2.1/code6 保数据安装成功不代表 1.2.2 已安装。
 
+**后续用户试用（2026-10-10）：**用户在实体设备上试用 1.2.2，确认头像显示，表示试用通过并授权合并与推送。此反馈解决了当时「线上头像是否可显示」的待确认项；本节前段仍是开发侧独立 QA 当时的范围，不代表开发侧完成了设备包摘要、保数据安装或全部场景的复测。
+
 正式交付包为 `G:\AI\coding\10-nga\V8_Release\nga-qing-1.2.2-v8.apk`，2,302,625 字节。独立核验 SHA-256 为 `42C393A710B5E61DFF352F19244FED0C1D5DDC1D7756CDC0CDD478EB94C4830D`，与旁附 `.sha256` 一致；`zipalign -c -v 4` 成功。`apksigner` 核实 v2 单签名，证书 SHA-256 为 `3774e86da5188b94341d667ad7e4a871ad8cda74f81088fb8445654d6068e0d6`，与 1.2.1 包一致。`aapt` 核实包名 `com.qingyi5427.ngaqing`、versionName `1.2.2`、versionCode `7`，Manifest 未含 `debuggable`、`testOnly` 或 instrumentation；包内没有测试类或公开头像 fixture。最终 APK 的 adaptive normal/round 图标引用及 foreground、monochrome、background 资源均存在，五密度 legacy normal/round PNG 也均存在。本轮未安装该包。
