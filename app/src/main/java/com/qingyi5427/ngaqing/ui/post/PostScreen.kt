@@ -49,6 +49,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -64,6 +65,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.MoreVert
@@ -173,18 +176,19 @@ fun PostScreen(
     root: RootViewModel = hiltViewModel(),
     isFocusMode: Boolean = false,
     onToggleFocus: (() -> Unit)? = null,
-    onShowBoards: (() -> Unit)? = null
+    onShowBoards: (() -> Unit)? = null,
+    boardName: String? = null
 ) {
     val readingDockMode by root.readingDockMode.collectAsStateWithLifecycle()
     val readingTextScale by root.readingTextScale.collectAsStateWithLifecycle()
     PostScreenContent(nav, viewModel, dark, readingDockMode, readingTextScale,
-        isFocusMode, onToggleFocus, onShowBoards)
+        isFocusMode, onToggleFocus, onShowBoards, boardName)
 }
 
 /** Compatibility entry used by existing isolated render tests without a Hilt root VM. */
 @Composable
 fun PostScreen(nav: NavHostController, viewModel: PostViewModel, dark: Boolean) {
-    PostScreenContent(nav, viewModel, dark, ReadingDockMode.AUTO, 1f, false, null, null)
+    PostScreenContent(nav, viewModel, dark, ReadingDockMode.AUTO, 1f, false, null, null, null)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -197,7 +201,8 @@ private fun PostScreenContent(
     readingTextScale: Float,
     isFocusMode: Boolean,
     onToggleFocus: (() -> Unit)?,
-    onShowBoards: (() -> Unit)?
+    onShowBoards: (() -> Unit)?,
+    boardName: String?
 ) {
     val s by viewModel.uiState.collectAsStateWithLifecycle()
     val subject by viewModel.subject.collectAsStateWithLifecycle()
@@ -254,6 +259,12 @@ private fun PostScreenContent(
     val dockBlocked = replyOpen || pagePickerOpen || jumpOpen || menuOpen ||
         openFloorMenuPid != null || favoriteError != null || dockPressed ||
         viewerUrl.value != null || imeVisible || dockHasFocus || touchExploration
+    val readingState = if (webFallback.value) null else s as? PostUiState.Success
+    val readingPage = readingState?.let {
+        readingPageForVisibleIndex(
+            it.posts, listState.firstVisibleItemIndex, it.fromCache, it.page, it.totalPages
+        )
+    } ?: 1
 
     LaunchedEffect(readingDockMode) { dockState.updateMode(readingDockMode) }
     LaunchedEffect(dockState.stage, dockState.timerEpoch, dockBlocked) {
@@ -347,38 +358,64 @@ private fun PostScreenContent(
                 .navigationBarsPadding()
         ) {
         Column(Modifier.fillMaxSize()) {
-        com.qingyi5427.ngaqing.ui.chrome.AppTopBar(
-            title = stripHtml(subject),
-            onTitleClick = {
-                scope.launch { listState.animateScrollToItem(0) }
-            },
-            navigationIcon = {
-                IconButton(onClick = { nav.popBackStack() }) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+        Row(
+            Modifier.fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
+                .height(if (mediumReading) 62.dp else if (layoutPolicy.compactHeight) 45.dp else 55.dp)
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(horizontal = if (mediumReading) 23.dp else 16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (onShowBoards != null && layoutPolicy.readerTwoPane) {
+                IconButton(onClick = onShowBoards, modifier = Modifier.size(48.dp)) {
+                    Icon(Icons.Filled.Menu, contentDescription = "打开版块导航",
+                        modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-            },
-            actions = {
-                if (onShowBoards != null && layoutPolicy.readerTwoPane) {
-                    IconButton(onClick = onShowBoards) {
-                        Icon(Icons.Filled.Menu, contentDescription = "打开版块导航")
+                Text(
+                    "${boardName?.takeIf(String::isNotBlank) ?: "社区讨论"} / 正在阅读",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f).padding(start = 8.dp)
+                )
+            } else {
+                Row(
+                    Modifier.clickable { nav.popBackStack() }.heightIn(min = 48.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null,
+                        modifier = Modifier.size(19.dp), tint = MaterialTheme.colorScheme.primary)
+                    Text("主题列表", color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.labelLarge)
+                }
+                Spacer(Modifier.weight(1f))
+            }
+            if (onToggleFocus != null && layoutPolicy.readerTwoPane) {
+                Surface(onClick = onToggleFocus, shape = RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.heightIn(min = 48.dp)) {
+                    Box(Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+                        Text(if (isFocusMode) "恢复双栏" else "专注阅读",
+                            style = MaterialTheme.typography.labelSmall)
                     }
                 }
-                if (onToggleFocus != null && layoutPolicy.readerTwoPane) {
-                    TextButton(onClick = onToggleFocus, modifier = Modifier.heightIn(min = 48.dp)) {
-                        Text(if (isFocusMode) "退出专注" else "专注阅读")
-                    }
+            }
+            IconButton(onClick = viewModel::toggleFavorite, modifier = Modifier.size(48.dp)) {
+                Icon(
+                    if (fav) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
+                    contentDescription = if (fav) "取消收藏" else "收藏",
+                    modifier = Modifier.size(20.dp),
+                    tint = if (fav) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Box {
+                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(48.dp)) {
+                    Icon(Icons.Filled.MoreHoriz, contentDescription = "更多",
+                        modifier = Modifier.size(21.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                IconButton(onClick = { viewModel.toggleFavorite() }) {
-                    Icon(
-                        if (fav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                        contentDescription = if (fav) "取消收藏" else "收藏",
-                        tint = if (fav) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                    )
-                }
-                Box {
-                    IconButton(onClick = { menuOpen = true }) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = "更多")
-                    }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                         DropdownMenuItem(
                             text = { Text("回复帖子") },
@@ -395,16 +432,16 @@ private fun PostScreenContent(
                             leadingIcon = { Icon(Icons.Filled.SwapVert, null) },
                             onClick = {
                                 menuOpen = false
-                                pageText = viewModel.page.value.toString()
+                                pageText = readingPage.toString()
                                 pagePickerOpen = true
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("显示阅读操作") },
+                            text = { Text(if (dockState.stage == ReaderDockStage.HIDDEN) "显示阅读操作" else "收起阅读操作") },
                             leadingIcon = { Icon(Icons.Filled.ExpandLess, null) },
                             onClick = {
                                 menuOpen = false
-                                dockState.expand()
+                                if (dockState.stage == ReaderDockStage.HIDDEN) dockState.expand() else dockState.hide()
                             }
                         )
                         DropdownMenuItem(
@@ -477,9 +514,10 @@ private fun PostScreenContent(
                             }
                         )
                     }
-                }
             }
-        )
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
+        ReaderFloorProgressBar(readingState, listState, totalRows)
         if (webFallback.value) {
             // A WebView rendered inside the pull-to-refresh haze source gets captured into
             // another GPU layer. On long NGA pages Chromium can run out of tile memory and
@@ -506,12 +544,13 @@ private fun PostScreenContent(
                 is PostUiState.Error -> ErrorView(cur.msg, cur.raw) { webFallback.value = true }
                 is PostUiState.Success -> {
                     val posts = cur.posts
+                    val firstReplyPid = posts.firstOrNull { it.lou > 0 }?.pid
                     LazyColumn(
                         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)
                             .nestedScroll(dockState.nestedScrollConnection)
                             .testTag("post-reading-list"),
                         state = listState,
-                        contentPadding = PaddingValues(bottom = 72.dp)
+                        contentPadding = PaddingValues(bottom = 128.dp)
                     ) {
                         if (cur.fromCache) {
                             item(key = "offline-banner", contentType = "offline-banner") {
@@ -537,6 +576,9 @@ private fun PostScreenContent(
                                 renderData = cur.renderData[post.renderKey()],
                                 mediumReading = mediumReading,
                                 readingTextScale = readingTextScale,
+                                boardName = boardName,
+                                isFirstReply = post.pid == firstReplyPid,
+                                replyCount = (totalRows - 1).coerceAtLeast(0),
                                 onImage = { viewerUrl.value = it },
                                 onJumpToFloor = { floor ->
                                     val idx = posts.indexOfFirst { it.lou == floor }
@@ -622,19 +664,7 @@ private fun PostScreenContent(
         }
         }
         }
-        val readingState = if (webFallback.value) null else s as? PostUiState.Success
         if (readingState != null && readingState.posts.isNotEmpty()) {
-            val readingPage by remember(readingState.posts, readingState.page, readingState.totalPages, readingState.fromCache) {
-                derivedStateOf {
-                    readingPageForVisibleIndex(
-                        readingState.posts,
-                        listState.firstVisibleItemIndex,
-                        readingState.fromCache,
-                        readingState.page,
-                        readingState.totalPages
-                    )
-                }
-            }
             AnimatedVisibility(
                 visible = dockState.stage != ReaderDockStage.HIDDEN && !replyOpen &&
                     !pagePickerOpen && !jumpOpen && viewerUrl.value == null && !imeVisible,
@@ -647,22 +677,15 @@ private fun PostScreenContent(
             val localReaderWidthDp = maxWidth.value
             ReaderDock(
                 stage = dockState.stage,
-                replyCount = totalRows,
-                currentPage = readingPage,
-                totalPages = readingState.totalPages,
+                replyCount = (totalRows - 1).coerceAtLeast(0),
                 isFavorite = fav,
                 onlyAuthor = onlyAuthor,
                 onExpand = dockState::expand,
-                onCollapse = dockState::peek,
                 onFavorite = viewModel::toggleFavorite,
                 onReply = {
                     viewModel.setReplyTarget(null)
                     replyText = savedDraft
                     replyOpen = true
-                },
-                onPage = {
-                    pageText = readingPage.toString()
-                    pagePickerOpen = true
                 },
                 onJump = {
                     jumpText = ""
@@ -674,8 +697,6 @@ private fun PostScreenContent(
                 onFocusChanged = { dockHasFocus = it },
                 onInteraction = dockState::resetIdleTimer,
                 onPressChanged = { dockPressed = it },
-                compact = localReaderWidthDp < 380f ||
-                    LocalDensity.current.fontScale >= 1.5f,
                 availableWidthDp = localReaderWidthDp
             )
             }
@@ -893,6 +914,61 @@ internal fun postLazyItemIndex(postIndex: Int, fromCache: Boolean): Int =
 internal fun visiblePostIndex(firstVisibleItemIndex: Int, fromCache: Boolean): Int =
     (firstVisibleItemIndex - if (fromCache) 1 else 0).coerceAtLeast(0)
 
+/** The only composable that observes per-pixel scroll offset; the full reader stays stable. */
+@Composable
+private fun ReaderFloorProgressBar(
+    readingState: PostUiState.Success?,
+    listState: LazyListState,
+    totalRows: Int
+) {
+    val progress by remember(readingState, listState, totalRows) {
+        derivedStateOf {
+            readingState?.let { state ->
+                readingFloorProgress(
+                    state.posts,
+                    listState.firstVisibleItemIndex,
+                    listState.firstVisibleItemScrollOffset,
+                    listState.layoutInfo.visibleItemsInfo.firstOrNull {
+                        it.index == listState.firstVisibleItemIndex
+                    }?.size ?: 0,
+                    state.fromCache,
+                    totalRows
+                )
+            }
+        }
+    }
+    Box(Modifier.fillMaxWidth().height(2.dp)
+        .background(MaterialTheme.colorScheme.surfaceVariant)) {
+        val widthFraction = progress
+        if (widthFraction != null && widthFraction > 0f) {
+            Box(Modifier.fillMaxWidth(widthFraction).height(2.dp)
+                .background(MaterialTheme.colorScheme.primary))
+        }
+    }
+}
+
+/** Floor-based progress stays stable when more pages load or an offline banner is inserted. */
+internal fun readingFloorProgress(
+    posts: List<Post>,
+    firstVisibleItemIndex: Int,
+    firstVisibleItemScrollOffset: Int,
+    firstVisibleItemSize: Int,
+    fromCache: Boolean,
+    totalRows: Int
+): Float? {
+    if (totalRows <= 0 || posts.isEmpty()) return null
+    val postIndex = visiblePostIndex(firstVisibleItemIndex, fromCache).coerceAtMost(posts.lastIndex)
+    val postItemIndex = postLazyItemIndex(postIndex, fromCache)
+    val fraction = when {
+        firstVisibleItemIndex < postItemIndex -> 0f // offline banner
+        firstVisibleItemIndex > postItemIndex -> 1f // footer after the last loaded floor
+        firstVisibleItemSize <= 0 -> 0f
+        else -> (firstVisibleItemScrollOffset.toFloat() / firstVisibleItemSize).coerceIn(0f, 1f)
+    }
+    return ((posts[postIndex].lou.coerceAtLeast(0) + fraction) / totalRows)
+        .coerceIn(0f, 1f)
+}
+
 /** Keep the visual page label compact; semantics and the page sheet retain the full count. */
 internal fun compactPageLabel(currentPage: Int, totalPages: Int, largeText: Boolean): String {
     val full = "$currentPage/$totalPages"
@@ -911,6 +987,9 @@ private fun PostCard(
     renderData: PostRenderData?,
     mediumReading: Boolean,
     readingTextScale: Float,
+    boardName: String?,
+    isFirstReply: Boolean,
+    replyCount: Int,
     onImage: (String) -> Unit,
     onJumpToFloor: (Int) -> Unit,
     onReply: (Post, Boolean) -> Unit,
@@ -922,15 +1001,15 @@ private fun PostCard(
     val showSignatures = LocalShowSignatures.current
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
-    val baseBody = MaterialTheme.typography.bodyLarge
     val mainBody = post.lou == 0
-    val bodyStyle = baseBody.copy(
-        fontSize = baseBody.fontSize * if (mainBody && mediumReading) 1.125f else 1f,
-        lineHeight = baseBody.lineHeight * when {
-            mainBody && mediumReading -> 33f / 26f
-            mainBody -> 29f / 26f
-            else -> 1f
-        }
+    val baseBody = MaterialTheme.typography.bodyLarge
+    val replyBody = MaterialTheme.typography.bodyMedium
+    val bodyStyle = if (mainBody) baseBody.copy(
+        fontSize = baseBody.fontSize * if (mediumReading) 1.125f else 1f,
+        lineHeight = baseBody.lineHeight * if (mediumReading) 33f / 26f else 30f / 26f
+    ) else replyBody.copy(
+        fontSize = replyBody.fontSize * if (mediumReading) 16f / 14f else 1f,
+        lineHeight = replyBody.lineHeight * if (mediumReading) 27.5f / 22f else 25f / 22f
     )
     var floorMenuOpen by remember(post.pid) { mutableStateOf(false) }
     LaunchedEffect(floorMenuOpen) { onFloorMenuChanged(floorMenuOpen) }
@@ -939,28 +1018,58 @@ private fun PostCard(
     Column(
         Modifier.fillMaxWidth()
             .background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = if (mediumReading) 24.dp else 20.dp, vertical = if (post.lou == 0) 24.dp else 20.dp)
+            .padding(
+                start = if (mediumReading) 40.dp else 24.dp,
+                end = if (mediumReading) 40.dp else 24.dp,
+                top = if (mainBody) (if (mediumReading) 32.dp else 24.dp) else 18.dp,
+                bottom = if (mainBody) 20.dp else 16.dp
+            )
     ) {
-        if (post.lou == 0) {
+        if (mainBody) {
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(boardName?.takeIf(String::isNotBlank) ?: "社区讨论",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold)
+                Box(Modifier.size(5.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
+                Text("COMMUNITY & IDEAS", style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold)
+            }
+            Spacer(Modifier.height(if (mediumReading) 18.dp else 13.dp))
             Text(
                 post.subject.ifBlank { "（无标题）" },
                 style = MaterialTheme.typography.headlineLarge.copy(
-                    fontSize = (if (mediumReading) 32.sp else 28.sp) * readingTextScale,
-                    lineHeight = (if (mediumReading) 40.sp else 36.sp) * readingTextScale
+                    fontSize = (if (mediumReading) 32.sp else 26.sp) * readingTextScale,
+                    lineHeight = (if (mediumReading) 45.sp else 36.sp) * readingTextScale,
+                    letterSpacing = (-0.7).sp
                 ),
-                fontWeight = FontWeight.Bold,
+                fontWeight = FontWeight.Medium,
                 color = MaterialTheme.colorScheme.onSurface
             )
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(if (mediumReading) 26.dp else 20.dp))
+        } else if (isFirstReply) {
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                Text("全部回复", fontSize = if (mediumReading) 21.sp else 18.sp,
+                    fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                Text("${replyCount.coerceAtLeast(0)} 条讨论",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Spacer(Modifier.height(15.dp))
         }
         // 作者行
         Row(verticalAlignment = Alignment.CenterVertically) {
-            AuthorAvatar(post.avatar, 36.dp)
-            Column(Modifier.weight(1f).padding(start = 10.dp)) {
+            AuthorAvatar(post.avatar, post.author, if (mainBody && mediumReading) 40.dp else if (mainBody) 35.dp else 30.dp)
+            Column(Modifier.weight(1f).padding(start = if (mediumReading) 13.dp else 10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         formatAuthorName(post.author),
-                        style = MaterialTheme.typography.labelLarge,
+                        style = MaterialTheme.typography.labelLarge.copy(
+                            fontSize = if (mainBody && mediumReading) 14.sp else if (mainBody) 12.sp else 11.sp),
+                        fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -969,8 +1078,8 @@ private fun PostCard(
                     if (post.lou == 0) {
                         Surface(
                             shape = RoundedCornerShape(6.dp),
-                            color = MaterialTheme.colorScheme.tertiaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(start = 7.dp)
                         ) {
                             Text(
@@ -981,21 +1090,22 @@ private fun PostCard(
                         }
                     }
                 }
-                Text(
-                    formatRelative(post.postDate),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Spacer(Modifier.height(3.dp))
+                Text(formatRelative(post.postDate),
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = if (mainBody && mediumReading) 12.sp else 11.sp,
+                        lineHeight = if (mainBody && mediumReading) 17.sp else 16.sp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Text(
                 "#${post.lou}",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.primary
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Box {
-                IconButton(onClick = { floorMenuOpen = true }) {
-                    Icon(Icons.Filled.MoreHoriz, contentDescription = "${post.lou}楼操作")
+                IconButton(onClick = { floorMenuOpen = true }, modifier = Modifier.size(48.dp)) {
+                    Icon(Icons.Filled.MoreHoriz, contentDescription = "${post.lou}楼操作",
+                        modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 DropdownMenu(
                     expanded = floorMenuOpen,
@@ -1053,9 +1163,28 @@ private fun PostCard(
                 }
             }
         }
-        Spacer(Modifier.height(18.dp))
+        if (mainBody) {
+            Spacer(Modifier.height(if (mediumReading) 27.dp else 20.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Spacer(Modifier.height(if (mediumReading) 31.dp else 23.dp))
+        } else {
+            Spacer(Modifier.height(10.dp))
+        }
         // 正文
-        blocks.forEach { block -> RenderBlock(block, onImage, onJumpToFloor, bodyStyle) }
+        Column(Modifier.padding(start = if (mainBody) 0.dp else 38.dp)) {
+            blocks.forEach { block -> RenderBlock(block, onImage, onJumpToFloor, bodyStyle) }
+        }
+        if (!mainBody) {
+            Row(Modifier.padding(start = 38.dp, top = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                Text("回复", modifier = Modifier.clickable { onReply(post, false) },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("引用", modifier = Modifier.clickable { onReply(post, true) },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         // 签名
         if (showSignatures && sigBlocks.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
@@ -1099,9 +1228,9 @@ private fun PostCard(
     }
 }
 
-/** 真实头像加载期间或失败时显示中性用户图标，不使用单字圆形伪头像。 */
+/** 真实头像加载期间显示由作者名派生的圆形占位，保持文章作者行的尺寸。 */
 @Composable
-private fun AuthorAvatar(avatar: String, size: androidx.compose.ui.unit.Dp) {
+private fun AuthorAvatar(avatar: String, author: String, size: androidx.compose.ui.unit.Dp) {
     var loaded by remember(avatar) { mutableStateOf(false) }
     Box(
         modifier = Modifier.size(size),
@@ -1110,17 +1239,14 @@ private fun AuthorAvatar(avatar: String, size: androidx.compose.ui.unit.Dp) {
         if (!loaded) {
             Surface(
                 modifier = Modifier.size(size),
-                shape = RoundedCornerShape(10.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.primary
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = "默认作者头像",
-                        modifier = Modifier.size(size * 0.56f),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
-                    )
+                    Text(formatAuthorName(author).take(1).ifBlank { "?" },
+                        fontSize = if (size >= 40.dp) 15.sp else 13.sp,
+                        color = MaterialTheme.colorScheme.primary)
                 }
             }
         }
@@ -1210,7 +1336,10 @@ private fun RenderBlock(
                     var state by remember { mutableStateOf(ContentImageState.Loading) }
                     Box(
                         modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)
-                            .padding(vertical = 4.dp).clip(RoundedCornerShape(8.dp))
+                            .padding(vertical = 16.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.24f))
+                            .padding(12.dp)
                     ) {
                         AsyncImage(
                             model = block.url,
@@ -1220,6 +1349,7 @@ private fun RenderBlock(
                             onSuccess = { state = ContentImageState.Success },
                             onError = { state = ContentImageState.Error },
                             modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp)
+                                .testTag(if (state == ContentImageState.Success) "post-image-loaded" else "post-image-pending")
                                 .then(
                                     if (state == ContentImageState.Success) {
                                         Modifier.clickable { onImage(block.url) }
@@ -1481,8 +1611,8 @@ private fun RenderBlock(
                 Modifier
                     .fillMaxWidth()
                     .padding(vertical = 6.dp)
-                    .clip(RoundedCornerShape(0.dp, 8.dp, 8.dp, 0.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .clip(RoundedCornerShape(0.dp, 12.dp, 12.dp, 0.dp))
+                    .background(MaterialTheme.colorScheme.background)
                     .leadingAccent(quoteAccent)
                     .then(
                         if (floor != null) Modifier.clickable { onJumpToFloor(floor) } else Modifier
@@ -1490,7 +1620,7 @@ private fun RenderBlock(
             ) {
                 Column(
                     Modifier.weight(1f)
-                        .padding(start = 14.dp, end = 11.dp, top = 9.dp, bottom = 9.dp)
+                        .padding(start = 17.dp, end = 16.dp, top = 15.dp, bottom = 15.dp)
                 ) {
                     val head = buildString {
                         append("回复")

@@ -3,6 +3,7 @@ package com.qingyi5427.ngaqing.ui.thread
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -12,15 +13,19 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.test.swipeUp
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
 import com.qingyi5427.ngaqing.data.model.Board
 import com.qingyi5427.ngaqing.data.model.ThreadItem
 import com.qingyi5427.ngaqing.ui.design.saveNativeScreenshot
+import com.qingyi5427.ngaqing.ui.Routes
 import com.qingyi5427.ngaqing.ui.root.RootViewModel
 import com.qingyi5427.ngaqing.ui.theme.NgaQingTheme
 import io.mockk.every
@@ -52,7 +57,12 @@ class HeaderScrollRenderTest {
             NgaQingTheme(themeMode = "light") {
                 Surface(Modifier.fillMaxSize()) {
                     val nav = rememberNavController()
-                    if (mounted.value) ThreadListScreen(nav, vm, root)
+                    NavHost(nav, startDestination = Routes.THREADS) {
+                        composable(Routes.THREADS) {
+                            if (mounted.value) ThreadListScreen(nav, vm, root)
+                        }
+                        composable(Routes.BOARDS) { Text("版块根页") }
+                    }
                 }
             }
         }
@@ -103,10 +113,12 @@ class HeaderScrollRenderTest {
         compose.onNodeWithTag("thread-list-viewport").performTouchInput { swipeDown() }
         check(progress.value < 0.9f) { "A downward gesture should reveal the header" }
         check(abs((initialTopBar.top - compose.onNodeWithTag("thread-top-bar").getUnclippedBoundsInRoot().top).value) <= 1f)
-        compose.onNode(hasText("探索交流") and hasClickAction()).performClick()
+        compose.onNodeWithContentDescription("返回版块目录").performClick()
         check(progress.value == 0f) { "Tapping the fixed title should restore the tools" }
         check(abs((initialHeader.top - compose.onNodeWithTag("thread-header").getUnclippedBoundsInRoot().top).value) <= 1f)
-        compose.onNodeWithText("全部主题").assertIsDisplayed()
+        compose.onNodeWithText("最新").assertIsDisplayed()
+        compose.onNodeWithTag("root-tab-${Routes.BOARDS}").performClick()
+        compose.onNodeWithText("版块根页").assertIsDisplayed()
     }
 
     @Test
@@ -127,9 +139,13 @@ class HeaderScrollRenderTest {
                 }
             }
         }
-        compose.onNodeWithTag("thread-header").performTouchInput { swipeUp() }
+        // At 320dp/2x the floating bottom dock overlaps the header's lower edge.
+        // Start within its unobscured upper half to exercise the actual drag surface.
+        compose.onNodeWithTag("thread-header").performTouchInput {
+            swipeUp(startY = height * 0.42f, endY = height * 0.06f)
+        }
         check(progress.value > 0f)
-        compose.onNode(hasText("探索交流") and hasClickAction()).assertIsDisplayed()
+        compose.onNodeWithContentDescription("返回版块目录").assertIsDisplayed()
         compose.onNodeWithText("主题 1：地图路线").assertIsDisplayed()
     }
 

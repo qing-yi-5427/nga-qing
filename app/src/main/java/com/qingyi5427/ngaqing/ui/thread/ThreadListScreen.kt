@@ -9,6 +9,7 @@ import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -31,10 +32,13 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Refresh
@@ -54,6 +58,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -77,6 +82,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -88,9 +94,11 @@ import androidx.navigation.NavHostController
 import com.qingyi5427.ngaqing.data.model.ThreadItem
 import com.qingyi5427.ngaqing.data.model.Board
 import com.qingyi5427.ngaqing.ui.Routes
+import com.qingyi5427.ngaqing.ui.adaptive.LocalV8LayoutPolicy
+import androidx.compose.ui.unit.sp
 import com.qingyi5427.ngaqing.ui.board.boardIdentityKey
 import com.qingyi5427.ngaqing.ui.board.favoriteBoardKey
-import com.qingyi5427.ngaqing.ui.chrome.AppTopBar
+import com.qingyi5427.ngaqing.ui.chrome.AppBottomBar
 import com.qingyi5427.ngaqing.ui.design.NgaDimensions
 import com.qingyi5427.ngaqing.ui.design.NgaStatePanel
 import com.qingyi5427.ngaqing.ui.root.RootViewModel
@@ -121,7 +129,8 @@ fun ThreadListScreen(
     root: RootViewModel = hiltViewModel(),
     selectedTid: String? = null,
     onOpenPost: (String) -> Unit = { nav.navigate(Routes.postRoute(it)) },
-    onOpenBoard: (Board) -> Unit = { nav.navigate(Routes.threadRoute(it.fid, it.name, it.stid)) }
+    onOpenBoard: (Board) -> Unit = { nav.navigate(Routes.threadRoute(it.fid, it.name, it.stid)) },
+    onShowBoards: (() -> Unit)? = null
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val blockedUsers by root.blacklistUsers.collectAsStateWithLifecycle(emptySet())
@@ -154,6 +163,7 @@ fun ThreadListScreen(
     }
     val scope = rememberCoroutineScope()
     var sortMenuOpen by remember { mutableStateOf(false) }
+    var topMenuOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(listState) {
         snapshotFlow {
@@ -190,6 +200,11 @@ fun ThreadListScreen(
         }
     }
 
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+    // The unselected wide-screen THREADS destination also lives in the list pane.
+    // Use this composable's measured width, rather than the outer window width.
+    val alongsideReader = selectedTid != null ||
+        (LocalV8LayoutPolicy.current.readerTwoPane && maxWidth < 400.dp)
     SwipeBackContainer(
         onBack = { nav.popBackStack() },
         customGestureTopInset = 120.dp
@@ -201,43 +216,84 @@ fun ThreadListScreen(
                 .navigationBarsPadding()
                 .clipToBounds()
         ) {
-            Box(Modifier.testTag("thread-top-bar")) {
-                    AppTopBar(
-                        title = stripHtml(viewModel.name),
-                        windowInsets = WindowInsets(0, 0, 0, 0),
-                        onTitleClick = {
-                            viewModel.setHeaderHiddenFraction(0f)
-                            if (listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0) {
-                                scope.launch { listState.animateScrollToItem(0) }
-                            } else {
-                                viewModel.refresh()
-                            }
+            Row(
+                Modifier.fillMaxWidth().testTag("thread-top-bar")
+                    .background(MaterialTheme.colorScheme.background)
+                    .heightIn(min = if (alongsideReader) 72.dp else 70.dp)
+                    .padding(horizontal = if (alongsideReader) 14.dp else 21.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    Modifier.weight(1f).clickable {
+                        viewModel.setHeaderHiddenFraction(0f)
+                        if (listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0) {
+                            scope.launch { listState.animateScrollToItem(0) }
+                        }
+                        if (onShowBoards != null) onShowBoards()
+                        else if (headerHiddenFraction == 0f) nav.popBackStack()
+                    }.heightIn(min = 48.dp)
+                        .semantics {
+                            contentDescription = if (onShowBoards != null) "打开版块目录" else "返回版块目录"
                         },
-                        navigationIcon = {
-                            IconButton(onClick = { nav.popBackStack() }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                            }
-                        },
-                        actions = {
-                            IconButton(onClick = viewModel::toggleFavoriteBoard) {
-                                Icon(
-                                    if (isFavoriteBoard) Icons.Filled.Star else Icons.Filled.StarBorder,
-                                    contentDescription = if (isFavoriteBoard) "取消收藏版块" else "收藏版块",
-                                    tint = if (isFavoriteBoard) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                            IconButton(onClick = { nav.navigate(Routes.searchRoute(viewModel.fid, viewModel.stid)) }) {
-                                Icon(Icons.Filled.Search, contentDescription = "搜索本版")
-                            }
-                            IconButton(onClick = {
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(9.dp)
+                ) {
+                    Surface(
+                        modifier = Modifier.size(35.dp),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        contentColor = MaterialTheme.colorScheme.surface,
+                        shape = RoundedCornerShape(11.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text("Q.", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("NGA Qing",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Icon(Icons.Filled.KeyboardArrowDown, null,
+                                Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Text("${stripHtml(viewModel.name)} · 主题列表",
+                            fontSize = 11.sp, lineHeight = 15.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                IconButton(onClick = { nav.navigate(Routes.newTopicRoute(viewModel.fid, viewModel.name, viewModel.stid)) },
+                    modifier = Modifier.size(48.dp)) {
+                    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceVariant) {
+                        Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Filled.Edit, contentDescription = "发主题", Modifier.size(17.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+                Box {
+                    IconButton(onClick = { topMenuOpen = true }, modifier = Modifier.size(40.dp)) {
+                        Icon(Icons.Filled.MoreHoriz, contentDescription = "版块更多操作",
+                            modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    DropdownMenu(expanded = topMenuOpen, onDismissRequest = { topMenuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text(if (isFavoriteBoard) "取消收藏版块" else "收藏版块") },
+                            leadingIcon = { Icon(if (isFavoriteBoard) Icons.Filled.Star else Icons.Filled.StarBorder, null) },
+                            onClick = { topMenuOpen = false; viewModel.toggleFavoriteBoard() }
+                        )
+                        DropdownMenuItem(text = { Text("刷新主题") },
+                            leadingIcon = { Icon(Icons.Filled.Refresh, null) },
+                            onClick = {
+                                topMenuOpen = false
                                 viewModel.setHeaderHiddenFraction(0f)
                                 viewModel.refresh()
-                            }) {
-                                Icon(Icons.Filled.Refresh, contentDescription = "刷新主题")
-                            }
-                        }
-                    )
+                            })
+                        DropdownMenuItem(text = { Text("返回") },
+                            onClick = { topMenuOpen = false; nav.popBackStack() })
+                    }
+                }
             }
             Layout(
                 modifier = Modifier.fillMaxWidth().weight(1f)
@@ -252,6 +308,8 @@ fun ThreadListScreen(
                         .testTag("thread-header")
                 ) {
                     ForumLevelNavigation(
+                        boardName = stripHtml(viewModel.name),
+                        alongsideReader = alongsideReader,
                         subBoards = subBoards,
                         selectedBoardKey = boardIdentityKey(viewModel.fid, viewModel.stid),
                         recommendedOnly = recommendedOnly,
@@ -265,9 +323,7 @@ fun ThreadListScreen(
                                 scope.launch { listState.scrollToItem(0) }
                             }
                         },
-                        onNewTopic = {
-                            nav.navigate(Routes.newTopicRoute(viewModel.fid, viewModel.name, viewModel.stid))
-                        },
+                        onSearch = { nav.navigate(Routes.searchRoute(viewModel.fid, viewModel.stid)) },
                         onRecommendedChange = { enabled ->
                             if (enabled != recommendedOnly) {
                                 viewModel.setRecommendedOnly(enabled)
@@ -305,9 +361,10 @@ fun ThreadListScreen(
                             )
                         } else {
                             LazyColumn(
-                                Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface),
+                                Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)
+                                    .testTag("thread-lazy-list"),
                                 state = listState,
-                                contentPadding = PaddingValues(bottom = 12.dp)
+                                contentPadding = PaddingValues(bottom = if (alongsideReader) 12.dp else 96.dp)
                             ) {
                                 if (current.fromCache) {
                                     item(key = "offline-banner", contentType = "offline-banner") {
@@ -325,7 +382,8 @@ fun ThreadListScreen(
                                     ThreadRow(
                                         thread,
                                         isVisited = thread.tid in visitedTids,
-                                        selected = thread.tid == selectedTid
+                                        selected = thread.tid == selectedTid,
+                                        compactPane = alongsideReader
                                     ) {
                                         viewModel.saveScrollPosition(
                                             listState.firstVisibleItemIndex,
@@ -382,11 +440,19 @@ fun ThreadListScreen(
         }
         }
     }
+    if (!alongsideReader) {
+        Box(Modifier.align(Alignment.BottomCenter)) {
+            AppBottomBar(nav, currentRoute = Routes.THREADS, selectedRoute = Routes.BOARDS)
+        }
+    }
+    }
 }
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 private fun ForumLevelNavigation(
+    boardName: String,
+    alongsideReader: Boolean,
     subBoards: List<Board>,
     selectedBoardKey: String,
     recommendedOnly: Boolean,
@@ -394,63 +460,83 @@ private fun ForumLevelNavigation(
     sortMenuOpen: Boolean,
     onSortMenuChange: (Boolean) -> Unit,
     onSortChange: (ThreadSort) -> Unit,
-    onNewTopic: () -> Unit,
+    onSearch: () -> Unit,
     onRecommendedChange: (Boolean) -> Unit,
     onOpenBoard: (Board) -> Unit
 ) {
     var boardSheetOpen by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
+    val sidePadding = if (alongsideReader) 17.dp else 21.dp
+    val comfort = LocalV8LayoutPolicy.current.mediumComfortTypography && !alongsideReader
+    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)) {
         Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
+            Modifier.fillMaxWidth().padding(start = sidePadding, end = sidePadding,
+                top = if (alongsideReader) 6.dp else 9.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            ForumTextTab(
-                selected = !recommendedOnly,
-                onClick = { onRecommendedChange(false) },
-                label = "全部主题"
-            )
-            ForumTextTab(
-                selected = recommendedOnly,
-                onClick = { onRecommendedChange(true) },
-                label = "精华区"
-            )
+            Text(boardName, fontSize = if (alongsideReader) 24.sp else if (comfort) 34.sp else 29.sp,
+                lineHeight = if (alongsideReader) 29.sp else if (comfort) 42.sp else 35.sp,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f))
             if (subBoards.isNotEmpty()) {
-                TextButton(onClick = { boardSheetOpen = true }, modifier = Modifier.heightIn(min = NgaDimensions.minimumTouch)) {
+                TextButton(onClick = { boardSheetOpen = true },
+                    modifier = Modifier.heightIn(min = NgaDimensions.minimumTouch)) {
                     Text("子版块", maxLines = 1)
                 }
             }
         }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Row(
-            Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp),
+            Modifier.fillMaxWidth().padding(horizontal = sidePadding)
+                .padding(top = if (alongsideReader) 13.dp else 15.dp,
+                    bottom = if (alongsideReader) 13.dp else 18.dp)
+                .heightIn(min = if (alongsideReader) 38.dp else if (comfort) 49.dp else 40.dp)
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(11.dp))
+                .clickable(onClick = onSearch)
+                .semantics { contentDescription = "搜索本版" }
+                .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(9.dp)
         ) {
-            Box(Modifier.weight(1f)) {
-                TextButton(onClick = { onSortMenuChange(true) }, modifier = Modifier.heightIn(min = NgaDimensions.minimumTouch)) {
-                    Text(if (sort == ThreadSort.LAST_REPLY) "最后回复 ↓" else "发帖时间 ↓")
+            Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(17.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("搜索主题与用户", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = if (alongsideReader) 14.dp else 20.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(if (alongsideReader) 6.dp else 17.dp)
+        ) {
+            ForumTextTab(selected = !recommendedOnly && sort == ThreadSort.LAST_REPLY,
+                onClick = {
+                    if (recommendedOnly) onRecommendedChange(false)
+                    if (sort != ThreadSort.LAST_REPLY) onSortChange(ThreadSort.LAST_REPLY)
+                }, label = "最新", segmented = alongsideReader)
+            ForumTextTab(selected = !recommendedOnly && sort == ThreadSort.POST_DATE,
+                onClick = {
+                    if (recommendedOnly) onRecommendedChange(false)
+                    if (sort != ThreadSort.POST_DATE) onSortChange(ThreadSort.POST_DATE)
+                }, label = "发帖", segmented = alongsideReader)
+            ForumTextTab(selected = recommendedOnly,
+                onClick = { onRecommendedChange(true) }, label = "精华", segmented = alongsideReader)
+            Spacer(Modifier.weight(1f))
+            Box {
+                IconButton(onClick = { onSortMenuChange(true) }, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Filled.MoreHoriz, contentDescription = "排序选项", Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 DropdownMenu(expanded = sortMenuOpen, onDismissRequest = { onSortMenuChange(false) }) {
-                    DropdownMenuItem(
-                        text = { Text("按最后回复排序") },
+                    DropdownMenuItem(text = { Text("按最后回复排序") },
                         leadingIcon = { if (sort == ThreadSort.LAST_REPLY) Icon(Icons.Filled.Check, null) },
-                        onClick = { onSortMenuChange(false); onSortChange(ThreadSort.LAST_REPLY) }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("按发帖时间排序") },
+                        onClick = { onSortMenuChange(false); onRecommendedChange(false); onSortChange(ThreadSort.LAST_REPLY) })
+                    DropdownMenuItem(text = { Text("按发帖时间排序") },
                         leadingIcon = { if (sort == ThreadSort.POST_DATE) Icon(Icons.Filled.Check, null) },
-                        onClick = { onSortMenuChange(false); onSortChange(ThreadSort.POST_DATE) }
-                    )
+                        onClick = { onSortMenuChange(false); onRecommendedChange(false); onSortChange(ThreadSort.POST_DATE) })
                 }
             }
-            TextButton(onClick = onNewTopic, modifier = Modifier.heightIn(min = NgaDimensions.minimumTouch)) {
-                Icon(Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.size(5.dp))
-                Text("发主题")
-            }
         }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
     if (boardSheetOpen) {
         ModalBottomSheet(onDismissRequest = { boardSheetOpen = false }) {
@@ -482,16 +568,16 @@ private fun ForumLevelNavigation(
             }
         }
     }
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 }
 
 @Composable
-private fun ForumTextTab(selected: Boolean, onClick: () -> Unit, label: String) {
+private fun ForumTextTab(selected: Boolean, onClick: () -> Unit, label: String,
+    segmented: Boolean = false) {
     val accent = MaterialTheme.colorScheme.primary
     Box(
         Modifier.heightIn(min = NgaDimensions.minimumTouch)
             .drawBehind {
-                if (selected) {
+                if (selected && !segmented) {
                     drawRect(
                         color = accent,
                         topLeft = Offset(0f, size.height - 2.dp.toPx()),
@@ -501,78 +587,98 @@ private fun ForumTextTab(selected: Boolean, onClick: () -> Unit, label: String) 
             }
             .semantics { this.selected = selected }
             .clickable(onClick = onClick)
-            .padding(horizontal = 3.dp),
+            .padding(horizontal = if (segmented) 9.dp else 3.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            label,
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        Surface(shape = RoundedCornerShape(if (segmented) 8.dp else 0.dp),
+            color = if (segmented && selected) MaterialTheme.colorScheme.surface
+                else androidx.compose.ui.graphics.Color.Transparent) {
+            Text(label, fontSize = 12.sp, lineHeight = 17.sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                color = if (selected && !segmented) MaterialTheme.colorScheme.primary
+                    else if (selected) MaterialTheme.colorScheme.onSurface
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = if (segmented) 7.dp else 0.dp,
+                    vertical = if (segmented) 7.dp else 0.dp))
+        }
     }
 }
 
 @Composable
-private fun ThreadRow(item: ThreadItem, isVisited: Boolean, selected: Boolean, onClick: () -> Unit) {
+private fun ThreadRow(
+    item: ThreadItem,
+    isVisited: Boolean,
+    selected: Boolean,
+    compactPane: Boolean,
+    onClick: () -> Unit
+) {
     val selectedAccent = MaterialTheme.colorScheme.primary
+    val comfortable = LocalV8LayoutPolicy.current.mediumComfortTypography && !compactPane
+    val author = formatAuthorName(item.author)
+    val horizontal = if (compactPane) 12.dp else 21.dp
     Column(
         Modifier.fillMaxWidth()
-            .background(if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)
+            .background(if (selected) MaterialTheme.colorScheme.primaryContainer
+                else if (compactPane) MaterialTheme.colorScheme.background
+                else MaterialTheme.colorScheme.surface)
             .drawBehind {
                 if (selected) drawRect(selectedAccent, size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height))
             }
             .semantics { this.selected = selected }
             .clickable(onClick = onClick)
             .heightIn(min = NgaDimensions.minimumTouch)
-            .padding(horizontal = 20.dp, vertical = 15.dp)
+            .padding(horizontal = horizontal, vertical = if (compactPane) 13.dp else 15.dp)
     ) {
-        Row(verticalAlignment = Alignment.Top) {
-            Text(
-                item.subject.ifBlank { "（无标题）" },
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = if (isVisited) FontWeight.Normal else FontWeight.SemiBold,
-                color = when {
-                    selected -> MaterialTheme.colorScheme.onPrimaryContainer
-                    isVisited -> MaterialTheme.colorScheme.onSurfaceVariant
-                    else -> MaterialTheme.colorScheme.onSurface
-                },
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
-            if (item.replies >= 30) {
-                Spacer(Modifier.size(10.dp))
-                Text(
-                    if (item.replies >= 100) "爆" else "热门",
-                    style = MaterialTheme.typography.labelSmall,
+        Row(verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (item.recommend > 0) {
+                Text("推荐", fontSize = 10.sp, lineHeight = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clip(MaterialTheme.shapes.small)
-                        .background(MaterialTheme.colorScheme.primaryContainer)
-                        .padding(horizontal = 7.dp, vertical = 3.dp)
-                )
+                    modifier = Modifier.background(MaterialTheme.colorScheme.primaryContainer,
+                        RoundedCornerShape(5.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
             }
-        }
-        Row(Modifier.padding(top = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "${formatAuthorName(item.author)} · ${formatRelative(item.lastPostDate)}",
-                style = MaterialTheme.typography.labelMedium,
+            Text(formatRelative(item.lastPostDate), fontSize = 11.sp, lineHeight = 15.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
-            )
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Text(item.subject.ifBlank { "（无标题）" },
+            fontSize = if (compactPane) 13.sp else if (comfortable) 16.sp else 14.sp,
+            lineHeight = if (compactPane) 19.sp else if (comfortable) 24.sp else 21.sp,
+            fontWeight = if (isVisited) FontWeight.Normal else FontWeight.Medium,
+            color = when {
+                selected -> MaterialTheme.colorScheme.onPrimaryContainer
+                isVisited -> MaterialTheme.colorScheme.onSurfaceVariant
+                else -> MaterialTheme.colorScheme.onSurface
+            },
+            maxLines = 2, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 6.dp))
+        Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Box(Modifier.size(if (compactPane) 20.dp else 24.dp)
+                    .background(MaterialTheme.colorScheme.primaryContainer,
+                        RoundedCornerShape(if (compactPane) 7.dp else 8.dp)),
+                contentAlignment = Alignment.Center) {
+                Text(author.take(1).ifBlank { "?" },
+                    fontSize = if (compactPane) 10.sp else 11.sp,
+                    lineHeight = 14.sp, fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary)
+            }
+            Text(author, fontSize = 11.sp, lineHeight = 16.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f))
             Icon(
                 Icons.Outlined.ChatBubbleOutline,
                 contentDescription = null,
-                modifier = Modifier.size(15.dp),
+                modifier = Modifier.size(14.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Text(
                 item.replies.toString(),
-                style = MaterialTheme.typography.labelMedium,
+                fontSize = 11.sp, lineHeight = 16.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 4.dp)
+                modifier = Modifier.padding(start = 2.dp)
             )
         }
     }
