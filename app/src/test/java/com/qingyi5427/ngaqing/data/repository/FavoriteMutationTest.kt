@@ -27,4 +27,20 @@ class FavoriteMutationTest {
             }
         }
     }
+
+    @Test fun unknownSuccessMessageCanProceedToReadBackButExplicitRejectionCannot() {
+        rejectExplicitFavoriteMutationError("""{"data":{"0":0,"1":"已处理"}}""")
+        rejectExplicitFavoriteMutationError("<html>unknown reply</html>")
+        rejectExplicitFavoriteMutationError("<html><script>window.script_muti_get_var_store={\"data\":{\"0\":\"操作成功\"}}</script></html>")
+        rejectExplicitFavoriteMutationError("""{"data":{"0":1,"1":"请求错误"}}""")
+        listOf(
+            """{"error":{"0":"权限不足"},"data":{"0":0}}""",
+            """{"error":"未登录","data":{"0":0}}""",
+            "<html><script>window.script_muti_get_var_store={\"error\":{\"0\":\"权限不足\"}}</script></html>"
+        ).forEach { response ->
+            assertThrows(IllegalStateException::class.java) {
+                rejectExplicitFavoriteMutationError(response)
+            }
+        }
+    }
 }

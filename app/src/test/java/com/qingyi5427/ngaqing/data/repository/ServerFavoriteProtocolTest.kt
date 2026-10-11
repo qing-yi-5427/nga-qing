@@ -44,9 +44,11 @@ class ServerFavoriteProtocolTest {
             val remove = server.takeRequest()
             assertEquals("POST", remove.method)
             assertEquals("del", remove.requestUrl?.queryParameter("__act"))
+            assertEquals("3", remove.requestUrl?.queryParameter("__output"))
             val body = remove.body.readUtf8()
             assertTrue(body.contains("folder=7"))
             assertTrue(body.contains("tidarray=47697364"))
+            assertTrue(body.contains("page=1"))
         }
     }
 }

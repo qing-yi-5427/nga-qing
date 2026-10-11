@@ -120,9 +120,8 @@ class FavoritesViewModel @Inject constructor(private val repo: NgaRepository) : 
                     folderId, selection, owner
                 ) else repo.removeFavorite(favorite.tid, folderId, selection, owner)
                 if (!repo.isSessionCurrent(owner)) return@launch
-                result.onSuccess {
-                    val selected = if (add) selection.selectedIds + folderId else selection.selectedIds - folderId
-                    manageState.value = FavoriteFolderUiState.Ready(selection.copy(selectedIds = selected))
+                result.onSuccess { confirmed ->
+                    manageState.value = FavoriteFolderUiState.Ready(confirmed)
                 }.onFailure {
                     actionError.value = it.message ?: "NGA 收藏操作未确认"
                     manageState.value = FavoriteFolderUiState.Error("操作未确认，请重新读取 NGA 文件夹")

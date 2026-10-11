@@ -563,7 +563,7 @@ class PostViewModel @Inject constructor(
                     if (error is CancellationException) throw error
                     _favoriteError.value = error.message ?: "NGA 新建收藏夹结果未确认"
                     _favoriteFolderUiState.value = FavoriteFolderUiState.Error(
-                        "操作结果未确认，请重新读取 NGA 文件夹后再操作"
+                        _favoriteError.value.orEmpty()
                     )
                 }
             } finally {
@@ -613,15 +613,14 @@ class PostViewModel @Inject constructor(
                     repo.removeFavorite(tid, folderId, selection, owner)
                 }
                 if (!repo.isSessionCurrent(owner)) return@launch
-                result.onSuccess {
-                    val selected = if (add) selection.selectedIds + folderId else selection.selectedIds - folderId
-                    _favoriteFolderUiState.value = FavoriteFolderUiState.Ready(selection.copy(selectedIds = selected))
-                    _favorite.value = selection.hasLocalCopy || selected.isNotEmpty()
+                result.onSuccess { confirmed ->
+                    _favoriteFolderUiState.value = FavoriteFolderUiState.Ready(confirmed)
+                    _favorite.value = confirmed.hasLocalCopy || confirmed.selectedIds.isNotEmpty()
                 }.onFailure { error ->
                     if (error is CancellationException) throw error
                     _favoriteError.value = error.message ?: "NGA 收藏操作未确认，请重新查看文件夹"
                     _favoriteFolderUiState.value = FavoriteFolderUiState.Error(
-                        "操作结果未确认，请重新读取 NGA 文件夹后再操作"
+                        _favoriteError.value.orEmpty()
                     )
                 }
             } finally {

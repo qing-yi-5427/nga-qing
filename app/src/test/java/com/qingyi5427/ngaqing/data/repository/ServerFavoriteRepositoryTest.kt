@@ -44,6 +44,12 @@ class ServerFavoriteRepositoryTest {
             folder = "待读", ts = 1234L, ownerUid = owner.uid
         ))
         mockTwoFolders()
+        coEvery { api.threadList(favor = 1, page = 1, session = any()) } returnsMany listOf(
+            threadPage("10"), threadPage("42"), threadPage("42"), threadPage("10")
+        )
+        coEvery { api.threadList(favor = 7, page = 1, session = any()) } returnsMany listOf(
+            threadPage("42"), threadPage("42"), threadPage("10"), threadPage("10")
+        )
         val initial = repo.loadServerFavoriteSelection("42", owner).getOrThrow()
         assertEquals(setOf("7"), initial.selectedIds)
         assertTrue(initial.hasLocalCopy)
@@ -73,6 +79,12 @@ class ServerFavoriteRepositoryTest {
         prefs.saveAuth("fav-server-b", "cid-b", "B")
         val owner = repo.captureSession()
         mockTwoFolders()
+        coEvery { api.threadList(favor = 1, page = 1, session = any()) } returnsMany listOf(
+            threadPage("10"), threadPage("10"), threadPage("42"), threadPage("42"), threadPage("10")
+        )
+        coEvery { api.threadList(favor = 7, page = 1, session = any()) } returnsMany listOf(
+            threadPage("42"), threadPage("42"), threadPage("42"), threadPage("10"), threadPage("10")
+        )
         val imported = repo.syncServerFavorites(owner).getOrThrow()
         assertEquals(2, imported)
         val remote = db.favoriteDao().get(owner.uid, "42")
@@ -114,6 +126,89 @@ class ServerFavoriteRepositoryTest {
         assertTrue(repo.addFavorite("99", "title", folderId = "1", selection = selection, session = owner).isFailure)
         assertNull(db.favoriteDao().get(owner.uid, "99"))
         assertTrue(db.serverFavoriteDao().memberships(owner.uid, "99").isEmpty())
+        coVerify(exactly = 1) { api.listServerFavoriteFolders(session = owner) }
+        coVerify(exactly = 1) { api.addServerFavorite(folder = "1", tid = "99", session = owner) }
+        db.close()
+    }
+
+    @Test fun unknownAddMessageSucceedsOnlyAfterOneWriteAndConfirmedMembership() = runBlocking {
+        prefs.saveAuth("fav-readback-add", "cid-a", "A")
+        val owner = repo.captureSession()
+        mockTwoFolders()
+        coEvery { api.threadList(favor = 1, page = 1, session = owner) } returnsMany listOf(
+            threadPage("10"), threadPage("99")
+        )
+        val before = repo.loadServerFavoriteSelection("99", owner).getOrThrow()
+        coEvery { api.addServerFavorite(folder = "1", tid = "99", session = owner) } returns
+            """{"data":{"0":0,"1":"已处理"}}"""
+
+        val after = repo.addFavorite("99", "title", folderId = "1", selection = before, session = owner)
+            .getOrThrow()
+        assertEquals(setOf("1"), after.selectedIds)
+        assertEquals(setOf("1"), db.serverFavoriteDao().memberships(owner.uid, "99").map { it.folderId }.toSet())
+        assertEquals("server", db.favoriteDao().get(owner.uid, "99")?.source)
+        coVerify(exactly = 1) { api.addServerFavorite(folder = "1", tid = "99", session = owner) }
+        db.close()
+    }
+
+    @Test fun unknownRemoveMessageNeedsConfirmedAbsenceAndKeepsLocalCopy() = runBlocking {
+        prefs.saveAuth("fav-readback-remove", "cid-r", "R")
+        val owner = repo.captureSession()
+        db.favoriteDao().insert(FavoriteEntity(
+            tid = "42", title = "local", fid = "", author = "R",
+            folder = "待读", ownerUid = owner.uid
+        ))
+        mockTwoFolders()
+        coEvery { api.threadList(favor = 7, page = 1, session = owner) } returnsMany listOf(
+            threadPage("42"), threadPage("10")
+        )
+        val before = repo.loadServerFavoriteSelection("42", owner).getOrThrow()
+        coEvery { api.removeServerFavorite(folder = "7", tidArray = "42", session = owner) } returns
+            """{"data":{"0":0,"1":"已处理"}}"""
+
+        val after = repo.removeFavorite("42", "7", before, owner).getOrThrow()
+        assertTrue(after.selectedIds.isEmpty())
+        assertTrue(after.hasLocalCopy)
+        assertTrue(db.serverFavoriteDao().memberships(owner.uid, "42").isEmpty())
+        assertEquals("local", db.favoriteDao().get(owner.uid, "42")?.source)
+        coVerify(exactly = 1) { api.removeServerFavorite(folder = "7", tidArray = "42", session = owner) }
+        db.close()
+    }
+
+    @Test fun mismatchedOrFailedReadbackNeverMarksAddAsSuccessful() = runBlocking {
+        prefs.saveAuth("fav-readback-fail", "cid-f", "F")
+        val owner = repo.captureSession()
+        mockTwoFolders()
+        val before = repo.loadServerFavoriteSelection("99", owner).getOrThrow()
+        coEvery { api.addServerFavorite(folder = "1", tid = "99", session = owner) } returns
+            """{"data":{"0":0,"1":"已处理"}}"""
+
+        assertTrue(repo.addFavorite("99", "title", folderId = "1", selection = before, session = owner).isFailure)
+        assertNull(db.favoriteDao().get(owner.uid, "99"))
+        assertTrue(db.serverFavoriteDao().memberships(owner.uid, "99").isEmpty())
+        coVerify(exactly = 1) { api.addServerFavorite(folder = "1", tid = "99", session = owner) }
+        db.close()
+    }
+
+    @Test fun failedReadbackKeepsExistingCloudStateAndDoesNotRepeatDelete() = runBlocking {
+        prefs.saveAuth("fav-readback-error", "cid-e", "E")
+        val owner = repo.captureSession()
+        mockTwoFolders()
+        val before = repo.loadServerFavoriteSelection("42", owner).getOrThrow()
+        db.serverFavoriteDao().putFolder(com.qingyi5427.ngaqing.data.local.ServerFavoriteFolderEntity(
+            owner.uid, "7", "待读", 1, false
+        ))
+        db.serverFavoriteDao().putMembership(com.qingyi5427.ngaqing.data.local.ServerFavoriteMembershipEntity(
+            owner.uid, "42", "7"
+        ))
+        coEvery { api.removeServerFavorite(folder = "7", tidArray = "42", session = owner) } returns
+            """{"data":{"0":0,"1":"已处理"}}"""
+        coEvery { api.listServerFavoriteFolders(session = owner) } returns
+            Response.success("""{"error":{"0":"稍后重试"}}""")
+
+        assertTrue(repo.removeFavorite("42", "7", before, owner).isFailure)
+        assertEquals(setOf("7"), db.serverFavoriteDao().memberships(owner.uid, "42").map { it.folderId }.toSet())
+        coVerify(exactly = 1) { api.removeServerFavorite(folder = "7", tidArray = "42", session = owner) }
         db.close()
     }
 

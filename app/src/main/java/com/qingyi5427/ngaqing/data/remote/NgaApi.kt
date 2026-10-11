@@ -163,7 +163,8 @@ interface NgaApi {
         @Query("__act") act: String = "del",
         @Field("folder") folder: String,
         @Field("tidarray") tidArray: String,
-        @Query("__output") output: Int = 8,
+        @Field("page") page: Int = 1,
+        @Query("__output") output: Int = 3,
         @Tag session: RequestPreferences? = null
     ): String
 }

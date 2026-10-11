@@ -1074,7 +1074,7 @@ class NgaRepository @Inject constructor(
         tid: String, title: String, fid: String = "", author: String = "",
         folderId: String, selection: ServerFavoriteSelection,
         session: RequestPreferences? = null
-    ): Result<Unit> {
+    ): Result<ServerFavoriteSelection> {
         return try {
             val snapshot = requireSession(session)
             require(snapshot.uid.isNotBlank()) { "请先登录 NGA 再使用云收藏" }
@@ -1082,13 +1082,17 @@ class NgaRepository @Inject constructor(
             require(selection.folders.any { it.id == folderId }) { "收藏文件夹已变化，请重新打开列表" }
             require(folderId !in selection.selectedIds) { "该帖已在所选文件夹中" }
             requireCurrent(snapshot)
-            parseFavoriteMutationResponse(
-                preprocess(api.addServerFavorite(folder = folderId, tid = tid, session = snapshot)), add = true
+            rejectExplicitFavoriteMutationError(
+                preprocess(api.addServerFavorite(folder = folderId, tid = tid, session = snapshot))
             )
             requireCurrent(snapshot)
+            val confirmed = loadServerFavoriteSelection(tid, snapshot).getOrThrow()
+            check(confirmed.folders.any { it.id == folderId } && folderId in confirmed.selectedIds) {
+                "NGA 尚未确认此帖加入所选文件夹，请重新读取核对"
+            }
             db.withTransaction {
                 requireCurrent(snapshot)
-                replaceServerMemberships(owner, tid, selection, selection.selectedIds + folderId)
+                replaceServerMemberships(owner, tid, confirmed, confirmed.selectedIds)
                 if (db.favoriteDao().get(owner, tid) == null) {
                     db.favoriteDao().insert(FavoriteEntity(
                         tid = tid, title = title, fid = fid, author = author,
@@ -1096,7 +1100,7 @@ class NgaRepository @Inject constructor(
                     ))
                 }
             }
-            Result.success(Unit)
+            Result.success(confirmed)
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
@@ -1150,26 +1154,29 @@ class NgaRepository @Inject constructor(
     suspend fun removeFavorite(
         tid: String, folderId: String, selection: ServerFavoriteSelection,
         session: RequestPreferences? = null
-    ): Result<Unit> = try {
+    ): Result<ServerFavoriteSelection> = try {
             val snapshot = requireSession(session)
             val owner = ownerOf(snapshot.uid)
             require(folderId in selection.selectedIds && selection.folders.any { it.id == folderId }) {
                 "该帖不在所选 NGA 收藏文件夹中，请重新打开列表"
             }
             requireCurrent(snapshot)
-            parseFavoriteMutationResponse(
-                preprocess(api.removeServerFavorite(folder = folderId, tidArray = tid, session = snapshot)), add = false
+            rejectExplicitFavoriteMutationError(
+                preprocess(api.removeServerFavorite(folder = folderId, tidArray = tid, session = snapshot))
             )
             requireCurrent(snapshot)
+            val confirmed = loadServerFavoriteSelection(tid, snapshot).getOrThrow()
+            check(confirmed.folders.any { it.id == folderId } && folderId !in confirmed.selectedIds) {
+                "NGA 尚未确认此帖从所选文件夹移除，请重新读取核对"
+            }
             db.withTransaction {
                 requireCurrent(snapshot)
-                val remaining = selection.selectedIds - folderId
-                replaceServerMemberships(owner, tid, selection, remaining)
-                if (remaining.isEmpty()) {
+                replaceServerMemberships(owner, tid, confirmed, confirmed.selectedIds)
+                if (confirmed.selectedIds.isEmpty()) {
                     db.favoriteDao().deleteServerCache(owner, tid)
                 }
             }
-            Result.success(Unit)
+            Result.success(confirmed)
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {

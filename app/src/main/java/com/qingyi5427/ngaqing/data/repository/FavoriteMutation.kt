@@ -24,3 +24,20 @@ internal fun parseFavoriteMutationResponse(response: String, add: Boolean) {
         "无法确认 NGA 收藏操作结果，请手动刷新后重试"
     }
 }
+
+/** A nonstandard success body is resolved by server read-back; an explicit rejection is final. */
+internal fun rejectExplicitFavoriteMutationError(response: String) {
+    val root = favoriteMutationJson(response) ?: return
+    if (root.has("error") && !root.isNull("error")) {
+        val error = root.opt("error")
+        if (error !is JSONObject || error.length() > 0) {
+            throw IllegalStateException(error?.toString()?.take(200) ?: "NGA 收藏操作失败")
+        }
+    }
+}
+
+private fun favoriteMutationJson(response: String): JSONObject? {
+    val body = response.substringAfter("window.script_muti_get_var_store=", response)
+        .substringBefore("</script>").trim().removeSuffix(";").trim()
+    return runCatching { JSONObject(body) }.getOrNull()
+}
