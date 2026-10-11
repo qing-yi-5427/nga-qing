@@ -39,6 +39,7 @@ import com.qingyi5427.ngaqing.ui.post.PostRenderData
 import com.qingyi5427.ngaqing.ui.post.PostScreen
 import com.qingyi5427.ngaqing.ui.post.PostUiState
 import com.qingyi5427.ngaqing.ui.post.PostViewModel
+import com.qingyi5427.ngaqing.ui.post.FavoriteFolderUiState
 import com.qingyi5427.ngaqing.ui.root.RootViewModel
 import com.qingyi5427.ngaqing.ui.theme.NgaQingTheme
 import com.qingyi5427.ngaqing.ui.thread.ThreadListScreen
@@ -132,7 +133,7 @@ class WindowPresetRenderTest {
             when (index) {
                 0, 1 -> compose.onNodeWithContentDescription("打开导航和更多选项").assertIsDisplayed()
                 2 -> compose.onNodeWithContentDescription("打开版块目录").assertIsDisplayed()
-                3 -> compose.onNodeWithContentDescription("收藏").assertIsDisplayed()
+                3 -> compose.onNodeWithContentDescription("选择收藏文件夹").assertIsDisplayed()
             }
             if (index == 2 && readerWide) {
                 compose.onNodeWithTag("thread-empty-reader").assertIsDisplayed()
@@ -180,6 +181,9 @@ class WindowPresetRenderTest {
         every { syncMessage } returns MutableStateFlow<String?>(null)
         every { syncError } returns MutableStateFlow<String?>(null)
         every { actionError } returns MutableStateFlow<String?>(null)
+        every { manageFavorite } returns MutableStateFlow<FavoriteEntity?>(null)
+        every { manageState } returns MutableStateFlow<FavoriteFolderUiState>(FavoriteFolderUiState.Closed)
+        every { actionBusy } returns MutableStateFlow(false)
     }
 
     private fun threadFixture(): ThreadListViewModel = mockk(relaxed = true) {
@@ -224,6 +228,8 @@ class WindowPresetRenderTest {
         every { replyResult } returns MutableStateFlow<String?>(null)
         every { replySucceeded } returns MutableStateFlow(false)
         every { favoriteError } returns MutableStateFlow<String?>(null)
+        every { favoriteFolderUiState } returns MutableStateFlow<FavoriteFolderUiState>(FavoriteFolderUiState.Closed)
+        every { favoriteBusy } returns MutableStateFlow(false)
     }
 
     private fun threadItem() = ThreadItem("101", "折叠屏使用一周后的体验", "晚风过境",

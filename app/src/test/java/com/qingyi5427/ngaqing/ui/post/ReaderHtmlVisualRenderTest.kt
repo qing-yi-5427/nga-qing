@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.content.Intent
 import androidx.core.view.drawToBitmap
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,10 +33,12 @@ import com.qingyi5427.ngaqing.ui.theme.NgaQingTheme
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.flow.MutableStateFlow
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
@@ -103,6 +106,22 @@ class ReaderHtmlVisualRenderTest {
     @Config(sdk = [33], qualifiers = "w986dp-h698dp")
     fun replyBodyQuoteAndActionsShareMainBodyLeftEdgeOnWideWindow() {
         assertReplyLeftEdge(986f, 698f, medium = true, "wide")
+    }
+
+    @Test
+    @Config(sdk = [33], qualifiers = "w425dp-h623dp")
+    fun videoLinkCardInReaderOpensCanonicalBilibiliPage() {
+        val videoUrl = "https://www.bilibili.com/video/BV1mYpb6XEFd/?p=1"
+        renderReader(425f, 623f, medium = false, videoUrl = videoUrl)
+        compose.onNodeWithTag("post-video-link").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("B站视频").assertIsDisplayed()
+        compose.runOnUiThread {
+            saveNativeScreenshot(compose.activity, "v8-123-reader-iframe-video-card.png")
+        }
+        compose.onNodeWithTag("post-video-link").performClick()
+        val launched = shadowOf(compose.activity).nextStartedActivity
+        assertEquals(Intent.ACTION_VIEW, launched.action)
+        assertEquals(videoUrl, launched.dataString)
     }
 
     @Test
@@ -182,7 +201,9 @@ class ReaderHtmlVisualRenderTest {
         }
     }
 
-    private fun renderReader(width: Float, height: Float, medium: Boolean, avatar: String = "") {
+    private fun renderReader(
+        width: Float, height: Float, medium: Boolean, avatar: String = "", videoUrl: String? = null
+    ) {
         val imageFile = makeIllustration()
         val first = Post("html-reader", "html-first", "晚风过境", "42", STORY_TITLE,
             1_790_540_000L, 0, "$FIRST_PARAGRAPH\n\n$SECOND_PARAGRAPH", avatar = avatar)
@@ -195,8 +216,9 @@ class ReaderHtmlVisualRenderTest {
         every { vm.uiState } returns MutableStateFlow<PostUiState>(PostUiState.Success(
             posts = listOf(first, reply, later), page = 1, totalPages = 2,
             renderData = mapOf(
-                "html-first" to PostRenderData(listOf(
+                "html-first" to PostRenderData(listOfNotNull(
                     PostBlock.Text("$FIRST_PARAGRAPH\n\n$SECOND_PARAGRAPH"),
+                    videoUrl?.let { PostBlock.VideoLink(it) },
                     PostBlock.Img(imageFile.toURI().toString()),
                     PostBlock.Text("一个关于阅读的小结", bold = true),
                     PostBlock.Quote(listOf(PostBlock.Text("让工具在需要的时候出现，让内容始终占据主角的位置。")),
@@ -227,6 +249,8 @@ class ReaderHtmlVisualRenderTest {
         every { vm.replyResult } returns MutableStateFlow<String?>(null)
         every { vm.replySucceeded } returns MutableStateFlow(false)
         every { vm.favoriteError } returns MutableStateFlow<String?>(null)
+        every { vm.favoriteFolderUiState } returns MutableStateFlow<FavoriteFolderUiState>(FavoriteFolderUiState.Closed)
+        every { vm.favoriteBusy } returns MutableStateFlow(false)
         val root = mockk<RootViewModel>(relaxed = true)
         every { root.readingDockMode } returns MutableStateFlow(ReadingDockMode.AUTO)
         every { root.readingTextScale } returns MutableStateFlow(1f)

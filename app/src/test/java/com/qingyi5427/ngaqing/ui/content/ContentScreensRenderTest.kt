@@ -52,6 +52,8 @@ import com.qingyi5427.ngaqing.data.local.HistoryEntity
 import com.qingyi5427.ngaqing.data.model.Board
 import com.qingyi5427.ngaqing.data.model.BoardGroup
 import com.qingyi5427.ngaqing.data.model.ThreadItem
+import com.qingyi5427.ngaqing.data.repository.ServerFavoriteFolder
+import com.qingyi5427.ngaqing.data.repository.ServerFavoriteSelection
 import com.qingyi5427.ngaqing.ui.Routes
 import com.qingyi5427.ngaqing.ui.RootPane
 import com.qingyi5427.ngaqing.ui.adaptive.calculatePaneLayout
@@ -63,6 +65,7 @@ import com.qingyi5427.ngaqing.ui.compose.NewTopicViewModel
 import com.qingyi5427.ngaqing.ui.design.saveNativeScreenshot
 import com.qingyi5427.ngaqing.ui.favorites.FavoritesScreen
 import com.qingyi5427.ngaqing.ui.favorites.FavoritesViewModel
+import com.qingyi5427.ngaqing.ui.post.FavoriteFolderUiState
 import com.qingyi5427.ngaqing.ui.history.HistoryScreen
 import com.qingyi5427.ngaqing.ui.history.HistoryViewModel
 import com.qingyi5427.ngaqing.ui.search.SearchScreen
@@ -165,6 +168,9 @@ class ContentScreensRenderTest {
         every { vm.syncMessage } returns MutableStateFlow<String?>(null)
         every { vm.syncError } returns MutableStateFlow<String?>(null)
         every { vm.actionError } returns MutableStateFlow<String?>(null)
+        every { vm.manageFavorite } returns MutableStateFlow<FavoriteEntity?>(null)
+        every { vm.manageState } returns MutableStateFlow<FavoriteFolderUiState>(FavoriteFolderUiState.Closed)
+        every { vm.actionBusy } returns MutableStateFlow(false)
         render { nav ->
             NavHost(navController = nav, startDestination = Routes.FAVORITES) {
                 composable(Routes.FAVORITES) { FavoritesScreen(nav, vm) }
@@ -199,6 +205,9 @@ class ContentScreensRenderTest {
         every { vm.syncMessage } returns MutableStateFlow<String?>(null)
         every { vm.syncError } returns syncError
         every { vm.actionError } returns MutableStateFlow<String?>(null)
+        every { vm.manageFavorite } returns MutableStateFlow<FavoriteEntity?>(null)
+        every { vm.manageState } returns MutableStateFlow<FavoriteFolderUiState>(FavoriteFolderUiState.Closed)
+        every { vm.actionBusy } returns MutableStateFlow(false)
         render(themeMode = "dark") { nav -> FavoritesScreen(nav, vm) }
         compose.onNodeWithText("收藏主题").assertIsDisplayed()
         compose.onNodeWithText("全部").assertIsDisplayed()
@@ -229,6 +238,9 @@ class ContentScreensRenderTest {
         every { vm.syncMessage } returns MutableStateFlow<String?>(null)
         every { vm.syncError } returns MutableStateFlow<String?>(null)
         every { vm.actionError } returns MutableStateFlow<String?>(null)
+        every { vm.manageFavorite } returns MutableStateFlow<FavoriteEntity?>(null)
+        every { vm.manageState } returns MutableStateFlow<FavoriteFolderUiState>(FavoriteFolderUiState.Closed)
+        every { vm.actionBusy } returns MutableStateFlow(false)
         render { nav ->
             RootPane(calculatePaneLayout(608f, 860f, null), nav, Routes.FAVORITES) {
                 FavoritesScreen(nav, vm)
@@ -258,6 +270,9 @@ class ContentScreensRenderTest {
         every { vm.syncMessage } returns MutableStateFlow<String?>(null)
         every { vm.syncError } returns MutableStateFlow<String?>(null)
         every { vm.actionError } returns MutableStateFlow<String?>(null)
+        every { vm.manageFavorite } returns MutableStateFlow<FavoriteEntity?>(null)
+        every { vm.manageState } returns MutableStateFlow<FavoriteFolderUiState>(FavoriteFolderUiState.Closed)
+        every { vm.actionBusy } returns MutableStateFlow(false)
         render { nav ->
             RootPane(calculatePaneLayout(860f, 608f, null), nav, Routes.FAVORITES) {
                 FavoritesScreen(nav, vm)
@@ -310,6 +325,9 @@ class ContentScreensRenderTest {
         every { vm.syncMessage } returns MutableStateFlow<String?>(null)
         every { vm.syncError } returns MutableStateFlow<String?>(null)
         every { vm.actionError } returns MutableStateFlow<String?>(null)
+        every { vm.manageFavorite } returns MutableStateFlow<FavoriteEntity?>(null)
+        every { vm.manageState } returns MutableStateFlow<FavoriteFolderUiState>(FavoriteFolderUiState.Closed)
+        every { vm.actionBusy } returns MutableStateFlow(false)
         render { nav ->
             RootPane(calculatePaneLayout(width, height, null), nav, Routes.FAVORITES) {
                 FavoritesScreen(nav, vm)
@@ -331,6 +349,9 @@ class ContentScreensRenderTest {
         every { vm.syncMessage } returns MutableStateFlow<String?>(null)
         every { vm.syncError } returns MutableStateFlow<String?>(null)
         every { vm.actionError } returns MutableStateFlow<String?>(null)
+        every { vm.manageFavorite } returns MutableStateFlow<FavoriteEntity?>(null)
+        every { vm.manageState } returns MutableStateFlow<FavoriteFolderUiState>(FavoriteFolderUiState.Closed)
+        every { vm.actionBusy } returns MutableStateFlow(false)
         render(themeMode = "dark", fontScale = 2f) { nav ->
             RootPane(calculatePaneLayout(320f, 568f, null, 2f), nav, Routes.FAVORITES) {
                 FavoritesScreen(nav, vm)
@@ -340,14 +361,58 @@ class ContentScreensRenderTest {
         compose.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
         compose.onNode(hasScrollToIndexAction()).performTouchInput { swipeUp() }
         screenshot("favorites-320-dark-2x-row.png")
-        compose.onNodeWithText("比较长的收藏分组名称").assertIsDisplayed()
+        compose.onNodeWithContentDescription("本地分组：比较长的收藏分组名称").assertIsDisplayed()
         compose.onNodeWithContentDescription("管理收藏 收藏主题").performClick()
-        compose.onNodeWithText("移动到其他分组").performClick()
+        compose.onNodeWithText("移动到其他本地分组").performClick()
         compose.onNodeWithText("移动收藏").assertIsDisplayed()
         compose.onNodeWithText("取消").performClick()
         compose.onNodeWithContentDescription("管理收藏 收藏主题").performScrollTo().performClick()
+        compose.onNodeWithText("移动到其他本地分组").performClick()
+        compose.onNodeWithText("移动").assertIsDisplayed().performClick()
+        verify { vm.move(match { it.tid == "1" }, "比较长的收藏分组名称") }
+        compose.onNodeWithContentDescription("管理收藏 收藏主题").performScrollTo().performClick()
         compose.onNodeWithText("取消收藏").performClick()
-        compose.onNodeWithText("取消收藏？").assertIsDisplayed()
+        verify { vm.openManage(match { it.tid == "1" }) }
+    }
+
+    @Test
+    @Config(sdk = [33], qualifiers = "w320dp-h568dp")
+    fun favoriteCloudFolderManagementRequiresExplicitConfirmedRemovalAtLargeText() {
+        val favorite = FavoriteEntity("1", "收藏主题", "10", "作者")
+        val folders = (1..12).map { index ->
+            ServerFavoriteFolder(index.toString(), "文件夹 $index", 1, index == 1)
+        }
+        val vm = mockk<FavoritesViewModel>(relaxed = true)
+        every { vm.favorites } returns MutableStateFlow(listOf(favorite))
+        every { vm.visitedTids } returns MutableStateFlow(emptySet())
+        every { vm.folders } returns MutableStateFlow<List<String>>(emptyList())
+        every { vm.syncing } returns MutableStateFlow(false)
+        every { vm.syncMessage } returns MutableStateFlow<String?>(null)
+        every { vm.syncError } returns MutableStateFlow<String?>(null)
+        every { vm.actionError } returns MutableStateFlow<String?>(null)
+        every { vm.manageFavorite } returns MutableStateFlow<FavoriteEntity?>(favorite)
+        every { vm.manageState } returns MutableStateFlow<FavoriteFolderUiState>(
+            FavoriteFolderUiState.Ready(ServerFavoriteSelection(folders, setOf("1"), false))
+        )
+        every { vm.actionBusy } returns MutableStateFlow(false)
+
+        render(themeMode = "dark", fontScale = 2f) { nav -> FavoritesScreen(nav, vm) }
+        compose.onNodeWithTag("favorite-manage-folder-label-1").assertIsDisplayed()
+            .performTouchInput { click() }
+        verify(exactly = 0) { vm.removeServerFolder(any()) }
+
+        compose.onNodeWithTag("favorite-manage-remove-1").performClick()
+        compose.onNodeWithText("从文件夹移除").assertIsDisplayed()
+        compose.onNodeWithTag("favorite-manage-keep").assertIsDisplayed().performClick()
+        verify(exactly = 0) { vm.removeServerFolder(any()) }
+
+        compose.onNodeWithTag("favorite-manage-remove-1").performClick()
+        compose.onNodeWithTag("favorite-manage-confirm-remove").assertIsDisplayed().performClick()
+        verify(exactly = 1) { vm.removeServerFolder("1") }
+
+        compose.onNodeWithTag("favorite-manage-add-12").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("关闭").assertIsDisplayed().performClick()
+        verify(exactly = 1) { vm.dismissManage() }
     }
 
     @Test
@@ -363,6 +428,9 @@ class ContentScreensRenderTest {
         every { vm.syncMessage } returns MutableStateFlow<String?>(null)
         every { vm.syncError } returns MutableStateFlow<String?>(null)
         every { vm.actionError } returns MutableStateFlow<String?>(null)
+        every { vm.manageFavorite } returns MutableStateFlow<FavoriteEntity?>(null)
+        every { vm.manageState } returns MutableStateFlow<FavoriteFolderUiState>(FavoriteFolderUiState.Closed)
+        every { vm.actionBusy } returns MutableStateFlow(false)
         render(fontScale = 2f) { nav ->
             NavHost(navController = nav, startDestination = Routes.FAVORITES) {
                 composable(Routes.FAVORITES) { FavoritesScreen(nav, vm) }

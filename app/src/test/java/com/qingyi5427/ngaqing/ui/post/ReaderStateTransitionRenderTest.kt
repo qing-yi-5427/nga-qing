@@ -195,6 +195,8 @@ class ReaderStateTransitionRenderTest {
         every { vm.replyResult } returns MutableStateFlow<String?>(null)
         every { vm.replySucceeded } returns MutableStateFlow(false)
         every { vm.favoriteError } returns MutableStateFlow<String?>(null)
+        every { vm.favoriteFolderUiState } returns MutableStateFlow<FavoriteFolderUiState>(FavoriteFolderUiState.Closed)
+        every { vm.favoriteBusy } returns MutableStateFlow(false)
         return vm
     }
 }

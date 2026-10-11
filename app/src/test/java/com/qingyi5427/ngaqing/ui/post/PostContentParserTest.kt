@@ -1,10 +1,57 @@
 package com.qingyi5427.ngaqing.ui.post
 
+import java.net.URI
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PostContentParserTest {
+    @Test
+    fun realShapeBilibiliIframeBecomesVideoLinkAndKeepsFollowingText() {
+        val blocks = PostContentParser.parse(
+            """开场[iframe src="//player.bilibili.com/player.html?isOutside=true&amp;aid=117410933902333&amp;bvid=BV1mYpb6XEFd&amp;cid=42598141456&amp;p=1" scrolling="no" border="0" frameborder="no" framespacing="0" allowfullscreen="true"][/iframe]后续中文正文"""
+        )
+
+        val destination = URI(blocks.filterIsInstance<PostBlock.VideoLink>().single().url)
+        assertEquals("https", destination.scheme)
+        assertEquals("www.bilibili.com", destination.host)
+        assertEquals("/video/BV1mYpb6XEFd/", destination.path)
+        assertEquals("p=1", destination.query)
+        assertTrue(blocks.filterIsInstance<PostBlock.Text>().any { it.text.contains("后续中文正文") })
+        assertTrue(blocks.filterIsInstance<PostBlock.Text>().none { it.text.contains("[iframe") })
+    }
+
+    @Test
+    fun singleQuotedIframeWithDimensionsAcceptsAidWithoutBvid() {
+        val blocks = PostContentParser.parse(
+            """<iframe width='640' height='360' src='https://player.bilibili.com/player.html?aid=117410933902333&amp;p=2'></iframe>正文继续"""
+        )
+
+        val destination = URI(blocks.filterIsInstance<PostBlock.VideoLink>().single().url)
+        assertEquals("www.bilibili.com", destination.host)
+        assertEquals("/video/av117410933902333/", destination.path)
+        assertEquals("p=2", destination.query)
+        assertTrue(blocks.filterIsInstance<PostBlock.Text>().any { it.text.contains("正文继续") })
+    }
+
+    @Test
+    fun unsupportedIframeHostFallsBackToSafeLinkAndDangerousSchemeToPlaceholder() {
+        val safe = PostContentParser.parse(
+            """[iframe width='640' src='https://video.example.org/embed?id=42'][/iframe]"""
+        )
+        assertEquals(
+            PostBlock.Link("打开嵌入链接", "https://video.example.org/embed?id=42"),
+            safe.filterIsInstance<PostBlock.Link>().single()
+        )
+        assertTrue(safe.none { it is PostBlock.VideoLink })
+
+        val unsafe = PostContentParser.parse(
+            """[iframe src='javascript:alert(1)' width='640'][/iframe]"""
+        )
+        assertEquals("[嵌入内容暂不可用]", unsafe.filterIsInstance<PostBlock.Text>().single().text)
+        assertTrue(unsafe.none { it is PostBlock.Link || it is PostBlock.VideoLink })
+    }
+
     @Test
     fun parsesCodeBlockWithoutTreatingUrlsAsLinks() {
         val blocks = PostContentParser.parse("前文[code]val url = \"https://example.com\"[/code]后文")

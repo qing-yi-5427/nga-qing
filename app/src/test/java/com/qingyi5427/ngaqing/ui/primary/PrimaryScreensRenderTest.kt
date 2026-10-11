@@ -60,6 +60,7 @@ import com.qingyi5427.ngaqing.ui.post.PostRenderData
 import com.qingyi5427.ngaqing.ui.post.PostScreen
 import com.qingyi5427.ngaqing.ui.post.PostUiState
 import com.qingyi5427.ngaqing.ui.post.PostViewModel
+import com.qingyi5427.ngaqing.ui.post.FavoriteFolderUiState
 import com.qingyi5427.ngaqing.ui.design.saveNativeScreenshot
 import com.qingyi5427.ngaqing.ui.root.RootViewModel
 import com.qingyi5427.ngaqing.ui.theme.NgaQingTheme
@@ -143,6 +144,8 @@ class PrimaryScreensRenderTest {
         every { posts.replyResult } returns MutableStateFlow<String?>(null)
         every { posts.replySucceeded } returns MutableStateFlow(false)
         every { posts.favoriteError } returns MutableStateFlow<String?>(null)
+        every { posts.favoriteFolderUiState } returns MutableStateFlow<FavoriteFolderUiState>(FavoriteFolderUiState.Closed)
+        every { posts.favoriteBusy } returns MutableStateFlow(false)
 
         val root = mockk<RootViewModel>(relaxed = true)
         every { root.blacklistUsers } returns MutableStateFlow(emptySet())
@@ -300,6 +303,8 @@ class PrimaryScreensRenderTest {
         every { vm.replyResult } returns MutableStateFlow<String?>(null)
         every { vm.replySucceeded } returns MutableStateFlow(false)
         every { vm.favoriteError } returns MutableStateFlow<String?>(null)
+        every { vm.favoriteFolderUiState } returns MutableStateFlow<FavoriteFolderUiState>(FavoriteFolderUiState.Closed)
+        every { vm.favoriteBusy } returns MutableStateFlow(false)
         render(themeMode = "dark", fontScale = 2f) { nav -> PostScreen(nav, vm, dark = true) }
         compose.onNodeWithText("回复 0").performClick()
         compose.onNodeWithContentDescription("更多").performClick()
@@ -374,6 +379,8 @@ class PrimaryScreensRenderTest {
         every { vm.replyResult } returns MutableStateFlow<String?>(null)
         every { vm.replySucceeded } returns MutableStateFlow(false)
         every { vm.favoriteError } returns MutableStateFlow<String?>(null)
+        every { vm.favoriteFolderUiState } returns MutableStateFlow<FavoriteFolderUiState>(FavoriteFolderUiState.Closed)
+        every { vm.favoriteBusy } returns MutableStateFlow(false)
         render { nav -> PostScreen(nav, vm, dark = false) }
         compose.onNodeWithText("一篇正常阅读的主题").assertIsDisplayed()
         compose.onNodeWithText(post.content).assertIsDisplayed()
@@ -443,6 +450,8 @@ class PrimaryScreensRenderTest {
         every { vm.replyResult } returns MutableStateFlow<String?>(null)
         every { vm.replySucceeded } returns MutableStateFlow(false)
         every { vm.favoriteError } returns MutableStateFlow<String?>(null)
+        every { vm.favoriteFolderUiState } returns MutableStateFlow<FavoriteFolderUiState>(FavoriteFolderUiState.Closed)
+        every { vm.favoriteBusy } returns MutableStateFlow(false)
         render { nav -> PostScreen(nav, vm, dark = false) }
         compose.onNodeWithText(post.content).assertIsDisplayed()
         compose.onNodeWithText("回复 1").performClick()
@@ -497,6 +506,8 @@ class PrimaryScreensRenderTest {
         every { vm.replyResult } returns MutableStateFlow<String?>(null)
         every { vm.replySucceeded } returns MutableStateFlow(false)
         every { vm.favoriteError } returns MutableStateFlow<String?>(null)
+        every { vm.favoriteFolderUiState } returns MutableStateFlow<FavoriteFolderUiState>(FavoriteFolderUiState.Closed)
+        every { vm.favoriteBusy } returns MutableStateFlow(false)
         render(themeMode = "dark", fontScale = 2f) { nav -> PostScreen(nav, vm, dark = true) }
         compose.onNodeWithText("回复 1").performClick()
         compose.onNodeWithContentDescription("只看楼主").assertIsDisplayed()
@@ -546,6 +557,8 @@ class PrimaryScreensRenderTest {
         every { vm.replyResult } returns MutableStateFlow<String?>(null)
         every { vm.replySucceeded } returns MutableStateFlow(false)
         every { vm.favoriteError } returns MutableStateFlow<String?>(null)
+        every { vm.favoriteFolderUiState } returns MutableStateFlow<FavoriteFolderUiState>(FavoriteFolderUiState.Closed)
+        every { vm.favoriteBusy } returns MutableStateFlow(false)
 
         render { nav -> PostScreen(nav, vm, dark = false) }
         compose.onNodeWithTag("post-quick-actions").assertDoesNotExist()
@@ -608,6 +621,8 @@ class PrimaryScreensRenderTest {
         every { vm.replyResult } returns MutableStateFlow<String?>(null)
         every { vm.replySucceeded } returns MutableStateFlow(false)
         every { vm.favoriteError } returns favoriteFailure
+        every { vm.favoriteFolderUiState } returns MutableStateFlow<FavoriteFolderUiState>(FavoriteFolderUiState.Closed)
+        every { vm.favoriteBusy } returns MutableStateFlow(false)
         every { vm.dismissFavoriteError() } answers { favoriteFailure.value = null }
         val mode = MutableStateFlow(ReadingDockMode.AUTO)
         val root = mockk<RootViewModel>(relaxed = true)
@@ -630,13 +645,13 @@ class PrimaryScreensRenderTest {
         compose.onNodeWithText("回复 2").performClick()
         compose.onNodeWithContentDescription("0楼操作").performClick()
         compose.mainClock.advanceTimeBy(8_000)
-        compose.onNodeWithContentDescription("收藏").assertIsDisplayed()
+        compose.onNodeWithContentDescription("选择收藏文件夹").assertIsDisplayed()
         compose.onNodeWithText("复制内容").performClick()
         compose.runOnUiThread { favoriteFailure.value = "网络失败" }
-        compose.onNodeWithText("收藏同步失败").assertIsDisplayed()
+        compose.onNodeWithText("收藏失败").assertIsDisplayed()
         compose.mainClock.advanceTimeBy(8_000)
-        compose.onNodeWithText("稍后处理").performClick()
-        compose.onNodeWithContentDescription("收藏").assertIsDisplayed()
+        compose.onNodeWithText("知道了").performClick()
+        compose.onNodeWithContentDescription("选择收藏文件夹").assertIsDisplayed()
         compose.onNodeWithTag("post-reading-list").performScrollToIndex(1)
         compose.onNodeWithText(reply.content).assertIsDisplayed()
         compose.runOnUiThread {

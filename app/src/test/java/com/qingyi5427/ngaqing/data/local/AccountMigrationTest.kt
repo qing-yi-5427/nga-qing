@@ -61,7 +61,7 @@ class AccountMigrationTest {
         helper.writableDatabase
         helper.close()
         val room = Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(accountMigration3To4 { owner })
+            .addMigrations(accountMigration3To4 { owner }, favoriteMigration4To5())
             .allowMainThreadQueries()
             .build()
         val migrated = room.openHelper.writableDatabase
@@ -77,7 +77,7 @@ class AccountMigrationTest {
 
     private val tables = listOf("favorites", "history", "favorite_boards", "response_cache", "drafts", "watched_threads")
     private val columns = mapOf(
-        "favorites" to "tid,title,fid,author,folder,ts",
+        "favorites" to "tid,title,fid,author,folder,ts,source",
         "history" to "tid,title,author,fid,lastVisited,lastFloor",
         "favorite_boards" to "`key`,fid,stid,name,info,addedAt",
         "response_cache" to "`key`,payload,updatedAt",
