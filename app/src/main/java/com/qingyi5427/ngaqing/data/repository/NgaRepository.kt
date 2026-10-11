@@ -24,6 +24,7 @@ import com.qingyi5427.ngaqing.data.model.ThreadPage
 import com.qingyi5427.ngaqing.data.model.CommunityItem
 import com.qingyi5427.ngaqing.data.model.UserProfile
 import com.qingyi5427.ngaqing.data.remote.NgaApi
+import com.qingyi5427.ngaqing.data.remote.SignedFavoriteApi
 import com.qingyi5427.ngaqing.data.remote.NgaResourceUrls
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineScope
@@ -139,7 +140,8 @@ class NgaRepository @Inject constructor(
     private val api: NgaApi,
     private val prefs: UserPreferences,
     private val db: AppDatabase,
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val signedFavorites: SignedFavoriteApi = SignedFavoriteApi(prefs)
 ) {
 
     /** 缓存持久化不阻塞网络结果交付；同一把锁保证“清空缓存”不会和后台写入交错。 */
@@ -1030,6 +1032,35 @@ class NgaRepository @Inject constructor(
         Result.failure(error)
     }
 
+    private suspend fun signedFavoriteTidSet(
+        session: RequestPreferences, folder: String
+    ): Set<String> {
+        val ids = mutableSetOf<String>()
+        var received = 0
+        for (page in 1..1000) {
+            val root = signedFavorites.listTopics(session, folder, page)
+            val items = root.optJSONObject("result")?.optJSONArray("data")
+                ?: error("签名收藏列表缺少主题数组")
+            val pages = root.optString("totalPage").toIntOrNull()
+                ?: error("签名收藏列表缺少页数")
+            val total = root.optString("total").toIntOrNull()
+                ?: error("签名收藏列表缺少总数")
+            check(pages in 0..1000 && (page <= pages || (page == 1 && pages == 0 && total == 0))) {
+                "签名收藏分页异常"
+            }
+            received += items.length()
+            (0 until items.length()).forEach { index ->
+                val tid = items.optJSONObject(index)?.optString("tid").orEmpty()
+                check(tid.isNotBlank() && ids.add(tid)) { "签名收藏主题 ID 缺失或重复" }
+            }
+            if (page == pages || pages == 0) {
+                check(received == total) { "签名收藏列表不完整" }
+                return ids
+            }
+        }
+        error("签名收藏页数超过限制")
+    }
+
     suspend fun addLocalFavorite(
         tid: String, title: String, fid: String = "", author: String = "",
         session: RequestPreferences? = null
@@ -1082,10 +1113,11 @@ class NgaRepository @Inject constructor(
             require(selection.folders.any { it.id == folderId }) { "收藏文件夹已变化，请重新打开列表" }
             require(folderId !in selection.selectedIds) { "该帖已在所选文件夹中" }
             requireCurrent(snapshot)
-            rejectExplicitFavoriteMutationError(
-                preprocess(api.addServerFavorite(folder = folderId, tid = tid, session = snapshot))
-            )
+            signedFavorites.add(snapshot, folderId, tid)
             requireCurrent(snapshot)
+            check(tid in signedFavoriteTidSet(snapshot, folderId)) {
+                "NGA 尚未确认此帖加入所选文件夹，请重新读取核对"
+            }
             val confirmed = loadServerFavoriteSelection(tid, snapshot).getOrThrow()
             check(confirmed.folders.any { it.id == folderId } && folderId in confirmed.selectedIds) {
                 "NGA 尚未确认此帖加入所选文件夹，请重新读取核对"
@@ -1160,11 +1192,20 @@ class NgaRepository @Inject constructor(
             require(folderId in selection.selectedIds && selection.folders.any { it.id == folderId }) {
                 "该帖不在所选 NGA 收藏文件夹中，请重新打开列表"
             }
+            val (freshFolders, freshTopics) = fetchServerFavoriteSnapshot(snapshot)
+            val freshFolder = freshFolders.singleOrNull { it.id == folderId }
+                ?: error("收藏文件夹已变化，请重新读取")
+            val members = freshTopics[freshFolder].orEmpty().map { it.tid }
+            check(tid in members) { "该帖已不在此收藏文件夹，请重新读取" }
+            check(members.size > 1) {
+                "文件夹只剩此主题，请重新读取并确认是否删除收藏夹"
+            }
             requireCurrent(snapshot)
-            rejectExplicitFavoriteMutationError(
-                preprocess(api.removeServerFavorite(folder = folderId, tidArray = tid, session = snapshot))
-            )
+            signedFavorites.remove(snapshot, folderId, tid)
             requireCurrent(snapshot)
+            check(tid !in signedFavoriteTidSet(snapshot, folderId)) {
+                "NGA 尚未确认此帖从所选文件夹移除，请重新读取核对"
+            }
             val confirmed = loadServerFavoriteSelection(tid, snapshot).getOrThrow()
             check(confirmed.folders.any { it.id == folderId } && folderId !in confirmed.selectedIds) {
                 "NGA 尚未确认此帖从所选文件夹移除，请重新读取核对"
@@ -1182,6 +1223,54 @@ class NgaRepository @Inject constructor(
         } catch (error: Exception) {
             Result.failure(IllegalStateException("NGA 收藏删除未确认：${error.message ?: "请重新打开文件夹核对"}", error))
         }
+
+    /** NGA does not remove the final topic from a folder. Deleting that folder needs explicit UI confirmation. */
+    suspend fun removeLastFavoriteAndFolder(
+        tid: String, folderId: String, folderName: String,
+        selection: ServerFavoriteSelection, session: RequestPreferences? = null
+    ): Result<ServerFavoriteSelection> = try {
+        val snapshot = requireSession(session)
+        require(snapshot.uid.isNotBlank()) { "请先登录 NGA" }
+        require(folderId in selection.selectedIds &&
+            selection.folders.any { it.id == folderId && it.name == folderName && it.count == 1 }) {
+            "收藏文件夹已变化，请重新读取后确认"
+        }
+        // This is a fresh, complete preflight. A stale dialog must never delete a folder
+        // that now contains another topic or belongs to a different account revision.
+        val (beforeFolders, beforeTopics) = fetchServerFavoriteSnapshot(snapshot)
+        val target = beforeFolders.singleOrNull { it.id == folderId }
+            ?: error("收藏文件夹已变化，请重新读取后确认")
+        check(target.name == folderName && target.count == 1 &&
+            beforeTopics[target]?.map { it.tid } == listOf(tid)) {
+            "收藏文件夹内容已变化，请重新读取后确认"
+        }
+        check(signedFavoriteTidSet(snapshot, folderId) == setOf(tid)) {
+            "NGA 当前收藏内容与网页读取不一致，请重新读取后确认"
+        }
+        requireCurrent(snapshot)
+        signedFavorites.deleteFolder(snapshot, folderId)
+        requireCurrent(snapshot)
+        val (afterFolders, afterTopics) = fetchServerFavoriteSnapshot(snapshot)
+        check(afterFolders.none { it.id == folderId }) {
+            "NGA 尚未确认删除收藏文件夹，请重新读取核对"
+        }
+        val remainingBefore = beforeFolders.mapTo(mutableSetOf()) { it.id } - folderId
+        check(afterFolders.mapTo(mutableSetOf()) { it.id }.containsAll(remainingBefore)) {
+            "NGA 未完整返回其他收藏文件夹，原有缓存保持不变"
+        }
+        // The complete post-write snapshot also handles deleting the account's only folder.
+        // It never removes local-only copies and runs atomically after authoritative readback.
+        applyServerFavoriteSnapshot(snapshot, afterFolders, afterTopics)
+        val selected = afterTopics.filterValues { topics -> topics.any { it.tid == tid } }
+            .keys.mapTo(mutableSetOf()) { it.id }
+        Result.success(ServerFavoriteSelection(afterFolders, selected, selection.hasLocalCopy))
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        Result.failure(IllegalStateException(
+            "NGA 收藏夹删除未确认：${error.message ?: "请重新读取文件夹核对"}", error
+        ))
+    }
 
     /**
      * Read every NGA folder before applying a single atomic snapshot. Existing local labels

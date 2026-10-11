@@ -105,7 +105,10 @@ class FavoritesViewModel @Inject constructor(private val repo: NgaRepository) : 
 
     fun removeServerFolder(folderId: String) = mutateServerFolder(folderId, add = false)
 
-    private fun mutateServerFolder(folderId: String, add: Boolean) {
+    fun removeLastFavoriteAndFolder(folderId: String, expectedFolderName: String) =
+        mutateServerFolder(folderId, add = false, expectedDeleteFolderName = expectedFolderName)
+
+    private fun mutateServerFolder(folderId: String, add: Boolean, expectedDeleteFolderName: String? = null) {
         if (actionBusy.value) return
         val favorite = manageFavorite.value ?: return
         val selection = (manageState.value as? FavoriteFolderUiState.Ready)?.selection ?: return
@@ -115,10 +118,21 @@ class FavoritesViewModel @Inject constructor(private val repo: NgaRepository) : 
         viewModelScope.launch {
             try {
                 if (!repo.isSessionCurrent(owner)) return@launch
-                val result = if (add) repo.addFavorite(
-                    favorite.tid, favorite.title, favorite.fid, favorite.author,
-                    folderId, selection, owner
-                ) else repo.removeFavorite(favorite.tid, folderId, selection, owner)
+                val result = when {
+                    add -> repo.addFavorite(
+                        favorite.tid, favorite.title, favorite.fid, favorite.author,
+                        folderId, selection, owner
+                    )
+                    expectedDeleteFolderName != null -> {
+                        val target = selection.folders.singleOrNull { it.id == folderId }
+                        if (target?.name != expectedDeleteFolderName)
+                            Result.failure(IllegalStateException("收藏文件夹名称已变化，请重新读取后确认"))
+                        else repo.removeLastFavoriteAndFolder(
+                            favorite.tid, folderId, expectedDeleteFolderName, selection, owner
+                        )
+                    }
+                    else -> repo.removeFavorite(favorite.tid, folderId, selection, owner)
+                }
                 if (!repo.isSessionCurrent(owner)) return@launch
                 result.onSuccess { confirmed ->
                     manageState.value = FavoriteFolderUiState.Ready(confirmed)

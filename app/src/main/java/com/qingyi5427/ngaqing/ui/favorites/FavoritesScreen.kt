@@ -119,7 +119,7 @@ fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hilt
         WindowInsets.navigationBars.getBottom(this).toDp()
     }
     var pendingMove by remember { mutableStateOf<FavoriteEntity?>(null) }
-    var pendingCloudRemoval by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var pendingCloudRemoval by remember { mutableStateOf<Triple<String, String, Boolean>?>(null) }
     var folderInput by remember { mutableStateOf("") }
     var query by rememberSaveable { mutableStateOf("") }
     var searchOpen by rememberSaveable { mutableStateOf(false) }
@@ -289,7 +289,7 @@ fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hilt
                                         maxLines = 2, overflow = TextOverflow.Ellipsis)
                                     if (selected) {
                                         TextButton(
-                                            onClick = { pendingCloudRemoval = folder.id to folder.name },
+                                            onClick = { pendingCloudRemoval = Triple(folder.id, folder.name, folder.count == 1) },
                                             enabled = !actionBusy,
                                             modifier = Modifier.heightIn(min = 48.dp)
                                                 .testTag("favorite-manage-remove-${folder.id}")
@@ -330,18 +330,24 @@ fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hilt
         )
     }
 
-    pendingCloudRemoval?.let { (folderId, folderName) ->
+    pendingCloudRemoval?.let { (folderId, folderName, lastInFolder) ->
         AlertDialog(
             onDismissRequest = { pendingCloudRemoval = null },
             shape = RoundedCornerShape(12.dp),
-            title = { Text("从文件夹移除") },
-            text = { Text("确定从“$folderName”移除此主题吗？") },
+            title = { Text(if (lastInFolder) "删除收藏夹并取消收藏" else "从文件夹移除") },
+            text = { Text(if (lastInFolder)
+                "“$folderName”只有此主题。确认后将删除这个 NGA 收藏夹及其中的收藏，收藏夹本身也会消失。"
+                else "确定从“$folderName”移除此主题吗？") },
             confirmButton = {
                 TextButton(onClick = {
                     pendingCloudRemoval = null
-                    viewModel.removeServerFolder(folderId)
+                    if (lastInFolder) viewModel.removeLastFavoriteAndFolder(folderId, folderName)
+                    else viewModel.removeServerFolder(folderId)
                 }, modifier = Modifier.heightIn(min = 48.dp)
-                    .testTag("favorite-manage-confirm-remove")) { Text("移除") }
+                    .testTag(if (lastInFolder) "favorite-manage-confirm-delete-folder"
+                        else "favorite-manage-confirm-remove")) {
+                    Text(if (lastInFolder) "删除收藏夹" else "移除")
+                }
             },
             dismissButton = {
                 TextButton(onClick = { pendingCloudRemoval = null },

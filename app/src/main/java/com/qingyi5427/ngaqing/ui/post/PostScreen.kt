@@ -252,7 +252,7 @@ private fun PostScreenContent(
     var jumpText by remember { mutableStateOf("") }
     var pagePickerOpen by remember { mutableStateOf(false) }
     var pageText by remember { mutableStateOf("") }
-    var pendingFavoriteRemoval by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var pendingFavoriteRemoval by remember { mutableStateOf<Triple<String, String, Boolean>?>(null) }
     var pendingFavoriteCreation by remember { mutableStateOf(false) }
     val replying by viewModel.replying.collectAsStateWithLifecycle()
     val replyResult by viewModel.replyResult.collectAsStateWithLifecycle()
@@ -372,7 +372,7 @@ private fun PostScreenContent(
                                     }
                                     if (selected) {
                                         TextButton(
-                                            onClick = { pendingFavoriteRemoval = folder.id to folder.name },
+                                            onClick = { pendingFavoriteRemoval = Triple(folder.id, folder.name, folder.count == 1) },
                                             enabled = !favoriteBusy,
                                             modifier = Modifier.testTag("post-favorite-remove-${folder.id}")
                                         ) { Text("移除") }
@@ -411,16 +411,22 @@ private fun PostScreenContent(
             }
         )
     }
-    pendingFavoriteRemoval?.let { (folderId, folderName) ->
+    pendingFavoriteRemoval?.let { (folderId, folderName, lastInFolder) ->
         AlertDialog(
             onDismissRequest = { pendingFavoriteRemoval = null },
-            title = { Text("从文件夹移除") },
-            text = { Text("确定从“$folderName”移除此主题吗？") },
+            title = { Text(if (lastInFolder) "删除收藏夹并取消收藏" else "从文件夹移除") },
+            text = { Text(if (lastInFolder)
+                "“$folderName”只有此主题。确认后将删除这个 NGA 收藏夹及其中的收藏，收藏夹本身也会消失。"
+                else "确定从“$folderName”移除此主题吗？") },
             confirmButton = {
                 TextButton(onClick = {
                     pendingFavoriteRemoval = null
-                    viewModel.removeFromFavoriteFolder(folderId)
-                }, modifier = Modifier.testTag("post-favorite-confirm-remove")) { Text("移除") }
+                    if (lastInFolder) viewModel.removeLastFavoriteAndFolder(folderId, folderName)
+                    else viewModel.removeFromFavoriteFolder(folderId)
+                }, modifier = Modifier.testTag(if (lastInFolder)
+                    "post-favorite-confirm-delete-folder" else "post-favorite-confirm-remove")) {
+                    Text(if (lastInFolder) "删除收藏夹" else "移除")
+                }
             },
             dismissButton = {
                 TextButton(onClick = { pendingFavoriteRemoval = null }) { Text("保留") }

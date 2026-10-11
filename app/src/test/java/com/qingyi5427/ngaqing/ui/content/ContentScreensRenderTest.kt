@@ -402,17 +402,50 @@ class ContentScreensRenderTest {
         verify(exactly = 0) { vm.removeServerFolder(any()) }
 
         compose.onNodeWithTag("favorite-manage-remove-1").performClick()
-        compose.onNodeWithText("从文件夹移除").assertIsDisplayed()
+        compose.onNodeWithText("删除收藏夹并取消收藏").assertIsDisplayed()
         compose.onNodeWithTag("favorite-manage-keep").assertIsDisplayed().performClick()
         verify(exactly = 0) { vm.removeServerFolder(any()) }
+        verify(exactly = 0) { vm.removeLastFavoriteAndFolder(any(), any()) }
 
         compose.onNodeWithTag("favorite-manage-remove-1").performClick()
-        compose.onNodeWithTag("favorite-manage-confirm-remove").assertIsDisplayed().performClick()
-        verify(exactly = 1) { vm.removeServerFolder("1") }
+        compose.onNodeWithTag("favorite-manage-confirm-delete-folder").assertIsDisplayed().performClick()
+        verify(exactly = 1) { vm.removeLastFavoriteAndFolder("1", "文件夹 1") }
 
         compose.onNodeWithTag("favorite-manage-add-12").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("关闭").assertIsDisplayed().performClick()
         verify(exactly = 1) { vm.dismissManage() }
+    }
+
+    @Test
+    fun ordinaryRemovalDialogNeverUpgradesToDeleteFolderWhenCountChanges() {
+        val favorite = FavoriteEntity("1", "收藏主题", "10", "作者")
+        val vm = mockk<FavoritesViewModel>(relaxed = true)
+        val folder = ServerFavoriteFolder("7", "待读", 2, false)
+        val manage = MutableStateFlow<FavoriteFolderUiState>(
+            FavoriteFolderUiState.Ready(ServerFavoriteSelection(listOf(folder), setOf("7"), false))
+        )
+        every { vm.favorites } returns MutableStateFlow(listOf(favorite))
+        every { vm.visitedTids } returns MutableStateFlow(emptySet())
+        every { vm.folders } returns MutableStateFlow<List<String>>(emptyList())
+        every { vm.syncing } returns MutableStateFlow(false)
+        every { vm.syncMessage } returns MutableStateFlow<String?>(null)
+        every { vm.syncError } returns MutableStateFlow<String?>(null)
+        every { vm.actionError } returns MutableStateFlow<String?>(null)
+        every { vm.manageFavorite } returns MutableStateFlow<FavoriteEntity?>(favorite)
+        every { vm.manageState } returns manage
+        every { vm.actionBusy } returns MutableStateFlow(false)
+
+        render { nav -> FavoritesScreen(nav, vm) }
+        compose.onNodeWithTag("favorite-manage-remove-7").performClick()
+        compose.onNodeWithTag("favorite-manage-confirm-remove").assertIsDisplayed()
+        compose.runOnUiThread {
+            manage.value = FavoriteFolderUiState.Ready(ServerFavoriteSelection(
+                listOf(folder.copy(count = 1)), setOf("7"), false
+            ))
+        }
+        compose.onNodeWithTag("favorite-manage-confirm-remove").assertIsDisplayed().performClick()
+        verify(exactly = 1) { vm.removeServerFolder("7") }
+        verify(exactly = 0) { vm.removeLastFavoriteAndFolder(any(), any()) }
     }
 
     @Test

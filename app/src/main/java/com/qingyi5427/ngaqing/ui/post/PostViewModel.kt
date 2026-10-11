@@ -575,6 +575,9 @@ class PostViewModel @Inject constructor(
 
     fun removeFromFavoriteFolder(folderId: String) = mutateServerFavorite(folderId, add = false)
 
+    fun removeLastFavoriteAndFolder(folderId: String, expectedFolderName: String) =
+        mutateServerFavorite(folderId, add = false, expectedDeleteFolderName = expectedFolderName)
+
     fun retryFavorite() = openFavoriteFolders()
 
     fun dismissFavoriteError() { _favoriteError.value = null }
@@ -597,7 +600,7 @@ class PostViewModel @Inject constructor(
         }
     }
 
-    private fun mutateServerFavorite(folderId: String, add: Boolean) {
+    private fun mutateServerFavorite(folderId: String, add: Boolean, expectedDeleteFolderName: String? = null) {
         if (_favoriteBusy.value) return
         val ready = _favoriteFolderUiState.value as? FavoriteFolderUiState.Ready ?: return
         val selection = ready.selection
@@ -607,10 +610,17 @@ class PostViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 if (!repo.isSessionCurrent(owner)) return@launch
-                val result = if (add) {
-                    repo.addFavorite(tid, _subject.value, threadFid, threadAuthor, folderId, selection, owner)
-                } else {
-                    repo.removeFavorite(tid, folderId, selection, owner)
+                val result = when {
+                    add -> repo.addFavorite(tid, _subject.value, threadFid, threadAuthor, folderId, selection, owner)
+                    expectedDeleteFolderName != null -> {
+                        val folder = selection.folders.singleOrNull { it.id == folderId }
+                        if (folder?.name != expectedDeleteFolderName)
+                            Result.failure(IllegalStateException("收藏文件夹名称已变化，请重新读取后确认"))
+                        else repo.removeLastFavoriteAndFolder(
+                            tid, folderId, expectedDeleteFolderName, selection, owner
+                        )
+                    }
+                    else -> repo.removeFavorite(tid, folderId, selection, owner)
                 }
                 if (!repo.isSessionCurrent(owner)) return@launch
                 result.onSuccess { confirmed ->
