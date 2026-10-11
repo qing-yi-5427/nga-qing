@@ -7,6 +7,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.qingyi5427.ngaqing.data.local.AppDatabase
 import com.qingyi5427.ngaqing.data.local.UserPreferences
 import com.qingyi5427.ngaqing.data.local.accountMigration3To4
+import com.qingyi5427.ngaqing.data.local.favoriteMigration4To5
 import com.qingyi5427.ngaqing.data.local.FavoriteDao
 import com.qingyi5427.ngaqing.data.local.FavoriteBoardDao
 import com.qingyi5427.ngaqing.data.local.HistoryDao
@@ -62,7 +63,7 @@ object DatabaseModule {
             // Room invokes migrations while opening the database. Read the same DataStore instance
             // used by authentication here, so ownership reflects the account at migration time.
             runBlocking { prefs.requestPreferences().uid }
-        }).build()
+        }, favoriteMigration4To5()).build()
     }
 
     @Provides

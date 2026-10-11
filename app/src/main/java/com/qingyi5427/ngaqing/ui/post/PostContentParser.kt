@@ -2,6 +2,7 @@ package com.qingyi5427.ngaqing.ui.post
 
 import androidx.compose.runtime.Immutable
 import com.qingyi5427.ngaqing.data.remote.NgaResourceUrls
+import java.net.URI
 
 /**
  * 帖子正文的 Compose 可渲染节点。
@@ -13,6 +14,7 @@ sealed interface PostBlock {
     data class Link(val label: String, val url: String) : PostBlock
     data class Img(val url: String, val emote: Boolean = false) : PostBlock
     data class Media(val url: String, val kind: MediaKind) : PostBlock
+    data class VideoLink(val url: String, val label: String = "B站视频") : PostBlock
     data class Table(val rows: List<List<String>>) : PostBlock
     data class Collapse(val title: String?, val blocks: List<PostBlock>) : PostBlock
     data class ReplyTo(val refName: String, val floor: Int?) : PostBlock
@@ -69,6 +71,16 @@ object PostContentParser {
         """\[flash(?:=(video|audio))?\]([\s\S]*?)\[/flash\]""",
         RegexOption.IGNORE_CASE
     )
+    private val IFRAME_RE = Regex(
+        """\[iframe\b([^\]]*)\][\s\S]*?\[/iframe\]|<iframe\b([^>]*)>[\s\S]*?</iframe\s*>""",
+        RegexOption.IGNORE_CASE
+    )
+    private val IFRAME_SRC_RE = Regex(
+        """(?:^|\s)src\s*=\s*(?:"([^"]*)"|'([^']*)')""",
+        RegexOption.IGNORE_CASE
+    )
+    private val BVID_RE = Regex("""BV[0-9A-Za-z]{10}""")
+    private val AID_RE = Regex("""[0-9]{1,20}""")
     private val CODE_RE = Regex(
         """\[code(?:=[^\]]*)?\]([\s\S]*?)\[/code\]""",
         RegexOption.IGNORE_CASE
@@ -107,6 +119,7 @@ object PostContentParser {
             """\[s:[^:\]]+:[^:\]]+\]|""" +
             """\[b\][\s\S]*?\[/b\]|\[del\][\s\S]*?\[/del\]|""" +
             """\[url(?:=[^\]]*)?\][\s\S]*?\[/url\]|""" +
+            """\[iframe\b[^\]]*\][\s\S]*?\[/iframe\]|<iframe\b[^>]*>[\s\S]*?</iframe\s*>|""" +
             """https?://[^\s\[\]<>\"']+|""" +
             """\[flash(?:=(?:video|audio))?\][\s\S]*?\[/flash\]|""" +
             """\u0001IMG\u0002[\s\S]*?\u0001IMG\u0002|""" +
@@ -192,6 +205,9 @@ object PostContentParser {
                         out += PostBlock.Text(label, bold, strike)
                     }
                 }
+                v.startsWith("[iframe", ignoreCase = true) ||
+                    v.startsWith("<iframe", ignoreCase = true) ->
+                    out += renderIframe(v)
                 v.startsWith("http://", ignoreCase = true) ||
                     v.startsWith("https://", ignoreCase = true) -> renderBareLink(v, bold, strike, out)
                 v.startsWith("[flash", ignoreCase = true) -> {
@@ -266,6 +282,45 @@ object PostContentParser {
         return url.takeIf {
             it.startsWith("https://", ignoreCase = true) || it.startsWith("http://", ignoreCase = true)
         }.orEmpty()
+    }
+
+    /** Embedded markup is data: accept only an HTTP(S) URL, never iframe attributes or HTML. */
+    private fun renderIframe(markup: String): PostBlock {
+        val matched = IFRAME_RE.matchEntire(markup)
+        val encodedAttributes = matched?.groupValues
+            ?.drop(1)?.firstOrNull(String::isNotEmpty).orEmpty()
+        val attributes = decodeEntities(encodedAttributes)
+        val srcMatch = IFRAME_SRC_RE.find(attributes)
+        val raw = srcMatch?.groupValues
+            ?.drop(1)?.firstOrNull(String::isNotEmpty).orEmpty()
+        val decoded = decodeEntities(raw).trim()
+        val url = if (decoded.startsWith("//")) "https:$decoded" else decoded
+        val uri = runCatching { URI(url) }.getOrNull()
+        if (uri == null || uri.scheme?.lowercase() !in setOf("http", "https") ||
+            uri.host.isNullOrBlank() || uri.rawUserInfo != null
+        ) return PostBlock.Text("[嵌入内容暂不可用]")
+
+        if (uri.host.equals("player.bilibili.com", ignoreCase = true) &&
+            uri.path == "/player.html"
+        ) {
+            val params = uri.rawQuery.orEmpty().split('&').mapNotNull { item ->
+                val key = item.substringBefore('=', missingDelimiterValue = "")
+                val value = item.substringAfter('=', missingDelimiterValue = "")
+                if (key.isEmpty() || value.isEmpty()) null else key to value
+            }.toMap()
+            val video = when {
+                BVID_RE.matches(params["bvid"].orEmpty()) -> params.getValue("bvid")
+                AID_RE.matches(params["aid"].orEmpty()) -> "av${params.getValue("aid")}"
+                else -> null
+            }
+            if (video != null) {
+                val page = params["p"]?.toIntOrNull()?.takeIf { it > 0 }
+                val destination = "https://www.bilibili.com/video/$video/" +
+                    (page?.let { "?p=$it" } ?: "")
+                return PostBlock.VideoLink(destination)
+            }
+        }
+        return PostBlock.Link("打开嵌入链接", url)
     }
 
     private fun renderReplyTo(

@@ -5,6 +5,8 @@ import android.util.Log
 import androidx.room.withTransaction
 import com.qingyi5427.ngaqing.data.local.AppDatabase
 import com.qingyi5427.ngaqing.data.local.FavoriteEntity
+import com.qingyi5427.ngaqing.data.local.ServerFavoriteFolderEntity
+import com.qingyi5427.ngaqing.data.local.ServerFavoriteMembershipEntity
 import com.qingyi5427.ngaqing.data.local.FavoriteBoardEntity
 import com.qingyi5427.ngaqing.data.local.HistoryEntity
 import com.qingyi5427.ngaqing.data.local.ResponseCacheEntity
@@ -1009,105 +1011,277 @@ class NgaRepository @Inject constructor(
         return db.favoriteDao().get(ownerOf(snapshot.uid), tid) != null
     }
 
-    suspend fun addFavorite(
-        tid: String, title: String, fid: String = "", author: String = "",
-        session: RequestPreferences? = null
-    ): Result<Unit> {
+    /** A complete cloud snapshot is required before presenting membership choices. */
+    suspend fun loadServerFavoriteSelection(
+        tid: String, session: RequestPreferences? = null
+    ): Result<ServerFavoriteSelection> = try {
         val snapshot = requireSession(session)
-        db.favoriteDao().insert(
-            FavoriteEntity(
-                tid = tid,
-                title = title,
-                fid = fid,
-                author = author,
-                ownerUid = ownerOf(snapshot.uid)
-            )
-        )
-        return try {
-            requireCurrent(snapshot)
-            parseFavoriteMutationResponse(preprocess(api.addServerFavorite(tid = tid, session = snapshot)), add = true)
-            requireCurrent(snapshot)
-            Result.success(Unit)
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            Result.failure(IllegalStateException("本地收藏已添加，NGA 端未确认：${error.message ?: "请手动重试"}", error))
-        }
-    }
-
-    suspend fun removeFavorite(tid: String, session: RequestPreferences? = null): Result<Unit> {
-        val snapshot = requireSession(session)
-        db.favoriteDao().deleteByTid(ownerOf(snapshot.uid), tid)
-        return try {
-            requireCurrent(snapshot)
-            parseFavoriteMutationResponse(preprocess(api.removeServerFavorite(tid = tid, tidArray = tid, session = snapshot)), add = false)
-            requireCurrent(snapshot)
-            Result.success(Unit)
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            Result.failure(IllegalStateException("本地收藏已移除，NGA 端未确认：${error.message ?: "请手动重试"}", error))
-        }
-    }
-
-    suspend fun retryServerFavorite(
-        tid: String, add: Boolean, session: RequestPreferences? = null
-    ): Result<Unit> = try {
-        val snapshot = requireSession(session)
-        val raw = if (add) {
-            api.addServerFavorite(tid = tid, session = snapshot)
-        } else {
-            api.removeServerFavorite(tid = tid, tidArray = tid, session = snapshot)
-        }
+        require(snapshot.uid.isNotBlank()) { "请先登录 NGA 再选择云收藏文件夹" }
+        val (folders, byFolder) = fetchServerFavoriteSnapshot(snapshot)
+        val owner = ownerOf(snapshot.uid)
         requireCurrent(snapshot)
-        parseFavoriteMutationResponse(preprocess(raw), add)
-        Result.success(Unit)
+        val selected = byFolder.filterValues { threads -> threads.any { it.tid == tid } }
+            .keys.mapTo(mutableSetOf()) { it.id }
+        val local = db.favoriteDao().get(owner, tid)?.source == "local"
+        Result.success(ServerFavoriteSelection(folders, selected, local))
     } catch (error: CancellationException) {
         throw error
     } catch (error: Exception) {
         Result.failure(error)
     }
 
+    suspend fun addLocalFavorite(
+        tid: String, title: String, fid: String = "", author: String = "",
+        session: RequestPreferences? = null
+    ) {
+        val snapshot = requireSession(session)
+        val owner = ownerOf(snapshot.uid)
+        db.withTransaction {
+            requireCurrent(snapshot)
+            val existing = db.favoriteDao().get(owner, tid)
+            requireCurrent(snapshot)
+            db.favoriteDao().insert(
+                (existing ?: FavoriteEntity(tid, title, fid, author, ownerUid = owner))
+                    .copy(source = "local")
+            )
+        }
+    }
+
+    suspend fun removeLocalFavorite(
+        tid: String, session: RequestPreferences? = null,
+        selection: ServerFavoriteSelection? = null
+    ) {
+        val snapshot = requireSession(session)
+        val owner = ownerOf(snapshot.uid)
+        db.withTransaction {
+            requireCurrent(snapshot)
+            val existing = db.favoriteDao().get(owner, tid) ?: return@withTransaction
+            if (existing.source == "local") {
+                val hasCloud = selection?.selectedIds?.isNotEmpty()
+                    ?: db.serverFavoriteDao().memberships(owner, tid).isNotEmpty()
+                requireCurrent(snapshot)
+                if (!hasCloud) {
+                    db.favoriteDao().deleteByTid(owner, tid)
+                } else {
+                    if (selection != null) replaceServerMemberships(owner, tid, selection, selection.selectedIds)
+                    db.favoriteDao().insert(existing.copy(source = "server"))
+                }
+            }
+        }
+    }
+
+    suspend fun addFavorite(
+        tid: String, title: String, fid: String = "", author: String = "",
+        folderId: String, selection: ServerFavoriteSelection,
+        session: RequestPreferences? = null
+    ): Result<Unit> {
+        return try {
+            val snapshot = requireSession(session)
+            require(snapshot.uid.isNotBlank()) { "请先登录 NGA 再使用云收藏" }
+            val owner = ownerOf(snapshot.uid)
+            require(selection.folders.any { it.id == folderId }) { "收藏文件夹已变化，请重新打开列表" }
+            require(folderId !in selection.selectedIds) { "该帖已在所选文件夹中" }
+            requireCurrent(snapshot)
+            parseFavoriteMutationResponse(
+                preprocess(api.addServerFavorite(folder = folderId, tid = tid, session = snapshot)), add = true
+            )
+            requireCurrent(snapshot)
+            db.withTransaction {
+                requireCurrent(snapshot)
+                replaceServerMemberships(owner, tid, selection, selection.selectedIds + folderId)
+                if (db.favoriteDao().get(owner, tid) == null) {
+                    db.favoriteDao().insert(FavoriteEntity(
+                        tid = tid, title = title, fid = fid, author = author,
+                        folder = "来自 NGA", ownerUid = owner, source = "server"
+                    ))
+                }
+            }
+            Result.success(Unit)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Result.failure(IllegalStateException("NGA 收藏未确认：${error.message ?: "请重新打开文件夹核对"}", error))
+        }
+    }
+
+    /** The NGA web picker creates a folder with folder=-1 when the user chooses it. */
+    suspend fun createFavoriteFolderAndAdd(
+        tid: String, title: String, fid: String = "", author: String = "",
+        selection: ServerFavoriteSelection, session: RequestPreferences? = null
+    ): Result<ServerFavoriteSelection> = try {
+        val snapshot = requireSession(session)
+        require(snapshot.uid.isNotBlank()) { "请先登录 NGA 再使用云收藏" }
+        requireCurrent(snapshot)
+        val mutationRaw = preprocess(api.addServerFavorite(folder = "-1", tid = tid, session = snapshot))
+        // The server may use a different success message when it creates a folder.
+        // Confirm by reading the new server folder and topic membership before caching it.
+        val responseCheck = runCatching { parseFavoriteMutationResponse(mutationRaw, add = true) }
+        if (responseCheck.isFailure) Log.w("NgaFavorites", "new_folder response needs read-back confirmation")
+        requireCurrent(snapshot)
+        val (folders, byFolder) = fetchServerFavoriteSnapshot(snapshot)
+        val selected = byFolder.filterValues { threads -> threads.any { it.tid == tid } }
+            .keys.mapTo(mutableSetOf()) { it.id }
+        val newFolderIds = folders.mapTo(mutableSetOf()) { it.id } -
+            selection.folders.mapTo(mutableSetOf()) { it.id }
+        check((selected intersect newFolderIds).isNotEmpty()) {
+            "NGA 已接收请求，但新文件夹中的主题尚未确认，请重新读取文件夹"
+        }
+        val owner = ownerOf(snapshot.uid)
+        db.withTransaction {
+            requireCurrent(snapshot)
+            replaceServerMemberships(owner, tid,
+                ServerFavoriteSelection(folders, selected, selection.hasLocalCopy), selected)
+            if (db.favoriteDao().get(owner, tid) == null) {
+                db.favoriteDao().insert(FavoriteEntity(
+                    tid = tid, title = title, fid = fid, author = author,
+                    folder = "来自 NGA", ownerUid = owner, source = "server"
+                ))
+            }
+        }
+        Result.success(ServerFavoriteSelection(folders, selected, selection.hasLocalCopy))
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Exception) {
+        Result.failure(IllegalStateException(
+            "NGA 新建收藏夹结果未确认：${error.message ?: "请重新读取文件夹核对"}", error
+        ))
+    }
+
+    suspend fun removeFavorite(
+        tid: String, folderId: String, selection: ServerFavoriteSelection,
+        session: RequestPreferences? = null
+    ): Result<Unit> = try {
+            val snapshot = requireSession(session)
+            val owner = ownerOf(snapshot.uid)
+            require(folderId in selection.selectedIds && selection.folders.any { it.id == folderId }) {
+                "该帖不在所选 NGA 收藏文件夹中，请重新打开列表"
+            }
+            requireCurrent(snapshot)
+            parseFavoriteMutationResponse(
+                preprocess(api.removeServerFavorite(folder = folderId, tidArray = tid, session = snapshot)), add = false
+            )
+            requireCurrent(snapshot)
+            db.withTransaction {
+                requireCurrent(snapshot)
+                val remaining = selection.selectedIds - folderId
+                replaceServerMemberships(owner, tid, selection, remaining)
+                if (remaining.isEmpty()) {
+                    db.favoriteDao().deleteServerCache(owner, tid)
+                }
+            }
+            Result.success(Unit)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            Result.failure(IllegalStateException("NGA 收藏删除未确认：${error.message ?: "请重新打开文件夹核对"}", error))
+        }
+
     /**
-     * 把 NGA 账号中的主题收藏合并进本地收藏。服务端接口不提供本地分组信息，
-     * 因此只补充缺失项目，不覆盖用户已设置的分组和本地时间。
+     * Read every NGA folder before applying a single atomic snapshot. Existing local labels
+     * remain local; the server memberships are stored separately by folder ID.
      */
     suspend fun syncServerFavorites(session: RequestPreferences? = null): Result<Int> = try {
         val snapshot = requireSession(session)
         require(snapshot.uid.isNotBlank()) { "请先登录再同步收藏" }
-        val all = collectFavoritePages { pageNumber ->
-            requireCurrent(snapshot)
-            val page = parseThreadsOffMain(api.threadList(favor = 1, page = pageNumber, session = snapshot))
-            requireCurrent(snapshot)
-            page
-        }
-        requireCurrent(snapshot)
-        var added = 0
-        db.withTransaction {
-            requireCurrent(snapshot)
-            val owner = ownerOf(snapshot.uid)
-            all.forEach { thread ->
-                requireCurrent(snapshot)
-                if (db.favoriteDao().get(owner, thread.tid) == null) {
-                    db.favoriteDao().insert(
-                        FavoriteEntity(
-                            tid = thread.tid,
-                            title = thread.subject.ifBlank { "主题 ${thread.tid}" },
-                            fid = "",
-                            author = thread.author,
-                            folder = "来自 NGA",
-                            ownerUid = owner
-                        )
-                    )
-                    added++
-                }
-            }
-        }
-        Result.success(added)
+        val (folders, byFolder) = fetchServerFavoriteSnapshot(snapshot)
+        check(folders.isNotEmpty()) { "NGA 未返回收藏文件夹，原有收藏保持不变" }
+        Result.success(applyServerFavoriteSnapshot(snapshot, folders, byFolder))
     } catch (error: CancellationException) {
         throw error
     } catch (error: Exception) {
         Result.failure(error)
+    }
+
+    private suspend fun fetchServerFavoriteSnapshot(
+        snapshot: RequestPreferences
+    ): Pair<List<ServerFavoriteFolder>, Map<ServerFavoriteFolder, List<ThreadItem>>> {
+        requireCurrent(snapshot)
+        val foldersById = linkedMapOf<String, ServerFavoriteFolder>()
+        for (folderPage in 1..100) {
+            requireCurrent(snapshot)
+            val response = api.listServerFavoriteFolders(page = folderPage, session = snapshot)
+            Log.i("NgaFavorites", "list_folder method=POST page=$folderPage status=${response.code()}")
+            check(response.isSuccessful) { "NGA 收藏文件夹读取失败 (HTTP ${response.code()})" }
+            val raw = response.body() ?: throw IllegalStateException("NGA 收藏文件夹响应为空")
+            val page = parseServerFavoriteFolderPage(preprocess(raw))
+            val previousSize = foldersById.size
+            page.folders.forEach { folder -> foldersById[folder.id] = folder }
+            Log.i("NgaFavorites", "list_folder page=$folderPage count=${page.folders.size} more=${page.hasMore}")
+            if (!page.hasMore) break
+            check(folderPage < 100 && foldersById.size > previousSize) {
+                "NGA 收藏文件夹分页未完整返回，原有缓存保持不变"
+            }
+        }
+        val folders = foldersById.values.sortedWith(
+            compareByDescending<ServerFavoriteFolder> { it.isDefault }.thenBy { it.id.toInt() }
+        )
+        requireCurrent(snapshot)
+        val byFolder = folders.associateWith { folder ->
+            collectFavoritePages { pageNumber ->
+                requireCurrent(snapshot)
+                val page = parseThreadsOffMain(api.threadList(
+                    favor = folder.id.toInt(), page = pageNumber, session = snapshot
+                ))
+                requireCurrent(snapshot)
+                page
+            }.also { threads ->
+                Log.i("NgaFavorites", "folder_topics folder=${folder.id} topics=${threads.size}")
+                check(threads.size >= folder.count) {
+                    "NGA 文件夹 ${folder.name} 仅返回 ${threads.size}/${folder.count} 个主题，已停止同步"
+                }
+            }
+        }
+        return folders to byFolder
+    }
+
+    private suspend fun replaceServerMemberships(
+        owner: String, tid: String, selection: ServerFavoriteSelection, selectedIds: Set<String>
+    ) {
+        val favoriteDao = db.serverFavoriteDao()
+        selection.folders.forEach { folder ->
+            favoriteDao.putFolder(ServerFavoriteFolderEntity(
+                owner, folder.id, folder.name, folder.count, folder.isDefault
+            ))
+        }
+        favoriteDao.clearMembershipsForTid(owner, tid)
+        selectedIds.forEach { folderId ->
+            favoriteDao.putMembership(ServerFavoriteMembershipEntity(owner, tid, folderId))
+        }
+    }
+
+    private suspend fun applyServerFavoriteSnapshot(
+        snapshot: RequestPreferences,
+        folders: List<ServerFavoriteFolder>,
+        byFolder: Map<ServerFavoriteFolder, List<ThreadItem>>
+    ): Int {
+        val owner = ownerOf(snapshot.uid)
+        var added = 0
+        db.withTransaction {
+            requireCurrent(snapshot)
+            val oldServerTids = db.serverFavoriteDao().allMemberships(owner).mapTo(mutableSetOf()) { it.tid }
+            db.serverFavoriteDao().clearMemberships(owner)
+            db.serverFavoriteDao().clearFolders(owner)
+            byFolder.forEach { (folder, threads) ->
+                db.serverFavoriteDao().putFolder(ServerFavoriteFolderEntity(
+                    owner, folder.id, folder.name, folder.count, folder.isDefault
+                ))
+                threads.forEach { thread ->
+                    db.serverFavoriteDao().putMembership(ServerFavoriteMembershipEntity(owner, thread.tid, folder.id))
+                    oldServerTids.remove(thread.tid)
+                    if (db.favoriteDao().get(owner, thread.tid) == null) {
+                        db.favoriteDao().insert(FavoriteEntity(
+                            tid = thread.tid,
+                            title = thread.subject.ifBlank { "主题 ${thread.tid}" },
+                            fid = "", author = thread.author, folder = "来自 NGA",
+                            ownerUid = owner, source = "server"
+                        ))
+                        added++
+                    }
+                }
+            }
+            oldServerTids.forEach { db.favoriteDao().deleteServerCache(owner, it) }
+        }
+        return added
     }
 
     suspend fun moveFavorite(tid: String, folder: String, session: RequestPreferences? = null) {

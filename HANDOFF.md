@@ -1,5 +1,11 @@
 # NGA 清漪 V8 交接（2026-10-10）
 
+## 1.2.3 阅读页与云收藏（2026-10-11）
+
+隔离分支 `fix/live-post-bookmarks-20261011` 的 1.2.3/code8 已在设备 `058A8840499C3540` 保数据覆盖安装并验收：`tid=47697364` 首楼 B 站 iframe 改为可点视频卡，后续正文保留；NGA 账号原无云收藏文件夹，按官网空态流程显式新建后，服务器回读新目录 `4719076` 包含当前帖，关闭重开仍显示已收藏。原本地收藏未删除。视频链接正确传给 Edge，B 站自身提示该视频页面不存在，未验证实际播放。临时手机常亮设置已恢复 `60000` / `0`。
+
+最终 APK：`G:\AI\coding\10-nga\V8_Release\nga-qing-1.2.3-v8.apk`，SHA-256 `1726B29C44979E407F80FF625B89316ABC6D6045BC0C49DF3D4604338DAA6F9A`，同签名、v2 验证与 zipalign 均通过。完整测试、真机截图、协议边界和未验范围见 `docs/live-post-bookmarks-qa-2026-10-11.md`；发布包核验见 `G:\AI\coding\10-nga\V8_Release\build-verification-1.2.3.md`。原 `NgaClient` 工作树未动，本轮未推送或发布 GitHub Release。
+
 V8 研发在隔离工作树 `G:\AI\coding\10-nga\NgaClient-ui-v8`、分支 `feat/ui-v8-adaptive` 完成；原 `G:\AI\coding\10-nga\NgaClient` 工作树中的未提交修改一直保留。视觉基准是同级 `NGA_Qing_UI_V8_Agent_Kit/nga-qing-ios-v8-inner-portrait.html` 及其 PNG；实施映射见 `docs/ui-v8-audit.md`，设备与场景记录见 `docs/ui-v8-qa/validation.md`。
 
 **2026-10-10 交付进展：**用户已在实体设备上试用 1.2.2，确认帖子头像显示并表示试用通过，授权合并并推送到自己的仓库。开发侧此前没有连接该设备；以下旧 QA 记录的「未实机验证」指当时的独立验证范围，不抹去该历史边界，也不将用户试用写成开发侧测试。Git 合并及推送结果应以远端 `main` 为准。

@@ -11,6 +11,7 @@ import com.qingyi5427.ngaqing.data.local.DraftEntity
 import com.qingyi5427.ngaqing.data.local.RequestPreferences
 import com.qingyi5427.ngaqing.data.remote.LoginHelper
 import com.qingyi5427.ngaqing.data.repository.NgaRepository
+import com.qingyi5427.ngaqing.data.repository.ServerFavoriteSelection
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -43,6 +44,13 @@ sealed interface PostUiState {
         val renderData: Map<String, PostRenderData> = emptyMap()
     ) : PostUiState
     data class Error(val raw: String, val msg: String) : PostUiState
+}
+
+sealed interface FavoriteFolderUiState {
+    data object Closed : FavoriteFolderUiState
+    data object Loading : FavoriteFolderUiState
+    data class Ready(val selection: ServerFavoriteSelection) : FavoriteFolderUiState
+    data class Error(val message: String) : FavoriteFolderUiState
 }
 
 internal data class ReadingPosition(val page: Int, val floor: Int)
@@ -91,8 +99,12 @@ class PostViewModel @Inject constructor(
     val isFavorite: StateFlow<Boolean> = _favorite.asStateFlow()
     private val _favoriteError = MutableStateFlow<String?>(null)
     val favoriteError: StateFlow<String?> = _favoriteError.asStateFlow()
-    private var retryFavoriteAdd: Boolean? = null
-    private var favoriteBusy = false
+    private val _favoriteFolderUiState = MutableStateFlow<FavoriteFolderUiState>(FavoriteFolderUiState.Closed)
+    val favoriteFolderUiState: StateFlow<FavoriteFolderUiState> = _favoriteFolderUiState.asStateFlow()
+    private val _favoriteBusy = MutableStateFlow(false)
+    val favoriteBusy: StateFlow<Boolean> = _favoriteBusy.asStateFlow()
+    private var favoriteFolderJob: Job? = null
+    private var favoriteFolderGeneration = 0L
 
     private val _isLoadingMore = MutableStateFlow(false)
     val isLoadingMore: StateFlow<Boolean> = _isLoadingMore.asStateFlow()
@@ -487,60 +499,134 @@ class PostViewModel @Inject constructor(
         enqueueHistoryFloor(repo, tid, confirmed, owner)
     }
 
-    fun toggleFavorite() {
-        if (favoriteBusy) return
-        val add = !_favorite.value
-        retryFavoriteAdd = null
+    /** Always inspect real cloud folders, including for legacy local-only bookmarks. */
+    fun openFavoriteFolders() {
+        if (_favoriteBusy.value) return
+        if (_favoriteFolderUiState.value == FavoriteFolderUiState.Loading) return
+        val owner = session ?: return
+        if (owner.uid.isBlank()) {
+            toggleLocalFavorite(owner)
+            return
+        }
         _favoriteError.value = null
-        mutateFavorite(add)
-    }
-
-    fun retryFavorite() {
-        if (favoriteBusy) return
-        val add = retryFavoriteAdd ?: return
-        favoriteBusy = true
-        viewModelScope.launch {
+        _favoriteFolderUiState.value = FavoriteFolderUiState.Loading
+        val generation = ++favoriteFolderGeneration
+        favoriteFolderJob = viewModelScope.launch {
             try {
-                val owner = session ?: return@launch
                 if (!repo.isSessionCurrent(owner)) return@launch
-                val result = repo.retryServerFavorite(tid, add, owner)
-                result.onSuccess {
-                    retryFavoriteAdd = null
-                    _favoriteError.value = null
-                }.onFailure {
-                    if (it is CancellationException) throw it
-                    _favoriteError.value = it.message ?: "同步 NGA 收藏失败"
-                }
+                val result = repo.loadServerFavoriteSelection(tid, owner)
+                if (generation != favoriteFolderGeneration || !repo.isSessionCurrent(owner)) return@launch
+                _favoriteFolderUiState.value = result.fold(
+                    onSuccess = { FavoriteFolderUiState.Ready(it) },
+                    onFailure = { error ->
+                        if (error is CancellationException) throw error
+                        FavoriteFolderUiState.Error(error.message ?: "NGA 收藏文件夹读取失败")
+                    }
+                )
             } finally {
-                favoriteBusy = false
+                if (generation == favoriteFolderGeneration && !repo.isSessionCurrent(owner)) {
+                    _favoriteFolderUiState.value = FavoriteFolderUiState.Closed
+                }
             }
         }
     }
 
-    fun dismissFavoriteError() {
-        _favoriteError.value = null
-        retryFavoriteAdd = null
+    fun toggleFavorite() = openFavoriteFolders()
+
+    fun dismissFavoriteFolders() {
+        if (!_favoriteBusy.value) {
+            favoriteFolderGeneration++
+            favoriteFolderJob?.cancel()
+            _favoriteFolderUiState.value = FavoriteFolderUiState.Closed
+        }
     }
 
-    private fun mutateFavorite(add: Boolean) {
-        favoriteBusy = true
+    fun addToFavoriteFolder(folderId: String) = mutateServerFavorite(folderId, add = true)
+
+    fun createFavoriteFolderAndAdd() {
+        if (_favoriteBusy.value) return
+        val ready = _favoriteFolderUiState.value as? FavoriteFolderUiState.Ready ?: return
+        val owner = session ?: return
+        _favoriteBusy.value = true
+        _favoriteError.value = null
         viewModelScope.launch {
             try {
-                val owner = session ?: return@launch
                 if (!repo.isSessionCurrent(owner)) return@launch
-                val result = if (add) repo.addFavorite(tid, _subject.value, threadFid, threadAuthor, owner)
-                    else repo.removeFavorite(tid, owner)
-                _favorite.value = add
-                result.onSuccess {
-                    _favoriteError.value = null
-                    retryFavoriteAdd = null
+                val result = repo.createFavoriteFolderAndAdd(
+                    tid, _subject.value, threadFid, threadAuthor, ready.selection, owner
+                )
+                if (!repo.isSessionCurrent(owner)) return@launch
+                result.onSuccess { selection ->
+                    _favoriteFolderUiState.value = FavoriteFolderUiState.Ready(selection)
+                    _favorite.value = true
                 }.onFailure { error ->
                     if (error is CancellationException) throw error
-                    retryFavoriteAdd = add
-                    _favoriteError.value = error.message ?: "同步 NGA 收藏失败"
+                    _favoriteError.value = error.message ?: "NGA 新建收藏夹结果未确认"
+                    _favoriteFolderUiState.value = FavoriteFolderUiState.Error(
+                        "操作结果未确认，请重新读取 NGA 文件夹后再操作"
+                    )
                 }
             } finally {
-                favoriteBusy = false
+                _favoriteBusy.value = false
+                if (!repo.isSessionCurrent(owner)) _favoriteFolderUiState.value = FavoriteFolderUiState.Closed
+            }
+        }
+    }
+
+    fun removeFromFavoriteFolder(folderId: String) = mutateServerFavorite(folderId, add = false)
+
+    fun retryFavorite() = openFavoriteFolders()
+
+    fun dismissFavoriteError() { _favoriteError.value = null }
+
+    private fun toggleLocalFavorite(owner: RequestPreferences) {
+        _favoriteBusy.value = true
+        viewModelScope.launch {
+            try {
+                if (!repo.isSessionCurrent(owner)) return@launch
+                if (_favorite.value) repo.removeLocalFavorite(tid, owner)
+                else repo.addLocalFavorite(tid, _subject.value, threadFid, threadAuthor, owner)
+                if (repo.isSessionCurrent(owner)) _favorite.value = !_favorite.value
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (repo.isSessionCurrent(owner)) _favoriteError.value = error.message ?: "本地收藏操作失败"
+            } finally {
+                _favoriteBusy.value = false
+            }
+        }
+    }
+
+    private fun mutateServerFavorite(folderId: String, add: Boolean) {
+        if (_favoriteBusy.value) return
+        val ready = _favoriteFolderUiState.value as? FavoriteFolderUiState.Ready ?: return
+        val selection = ready.selection
+        val owner = session ?: return
+        _favoriteBusy.value = true
+        _favoriteError.value = null
+        viewModelScope.launch {
+            try {
+                if (!repo.isSessionCurrent(owner)) return@launch
+                val result = if (add) {
+                    repo.addFavorite(tid, _subject.value, threadFid, threadAuthor, folderId, selection, owner)
+                } else {
+                    repo.removeFavorite(tid, folderId, selection, owner)
+                }
+                if (!repo.isSessionCurrent(owner)) return@launch
+                result.onSuccess {
+                    val selected = if (add) selection.selectedIds + folderId else selection.selectedIds - folderId
+                    _favoriteFolderUiState.value = FavoriteFolderUiState.Ready(selection.copy(selectedIds = selected))
+                    _favorite.value = selection.hasLocalCopy || selected.isNotEmpty()
+                }.onFailure { error ->
+                    if (error is CancellationException) throw error
+                    _favoriteError.value = error.message ?: "NGA 收藏操作未确认，请重新查看文件夹"
+                    _favoriteFolderUiState.value = FavoriteFolderUiState.Error(
+                        "操作结果未确认，请重新读取 NGA 文件夹后再操作"
+                    )
+                }
+            } finally {
+                _favoriteBusy.value = false
+                if (!repo.isSessionCurrent(owner)) _favoriteFolderUiState.value = FavoriteFolderUiState.Closed
             }
         }
     }

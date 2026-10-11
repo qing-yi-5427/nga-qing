@@ -22,6 +22,18 @@ class PostContentParserTest {
     }
 
     @Test
+    fun encodedIframeAttributeQuotesBecomeVideoWithoutDoubleDecodingBody() {
+        val blocks = PostContentParser.parse(
+            """开场[iframe src=&quot;//player.bilibili.com/player.html?isOutside=true&amp;aid=117410933902333&amp;bvid=BV1mYpb6XEFd&amp;p=2&quot; scrolling=&quot;no&quot;][/iframe]尾段 &amp;amp; 保留"""
+        )
+
+        val destination = URI(blocks.filterIsInstance<PostBlock.VideoLink>().single().url)
+        assertEquals("https://www.bilibili.com/video/BV1mYpb6XEFd/?p=2", destination.toString())
+        assertTrue(blocks.filterIsInstance<PostBlock.Text>().any { it.text.contains("尾段 &amp; 保留") })
+        assertTrue(blocks.filterIsInstance<PostBlock.Text>().none { it.text.contains("[iframe") })
+    }
+
+    @Test
     fun singleQuotedIframeWithDimensionsAcceptsAidWithoutBvid() {
         val blocks = PostContentParser.parse(
             """<iframe width='640' height='360' src='https://player.bilibili.com/player.html?aid=117410933902333&amp;p=2'></iframe>正文继续"""

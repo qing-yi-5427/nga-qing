@@ -2,6 +2,7 @@ package com.qingyi5427.ngaqing.data.local
 
 import androidx.room.Dao
 import androidx.room.Database
+import androidx.room.ColumnInfo
 import androidx.room.Delete
 import androidx.room.Entity
 import androidx.room.Insert
@@ -19,7 +20,8 @@ data class FavoriteEntity(
     val author: String,
     val folder: String = "默认",
     val ts: Long = System.currentTimeMillis(),
-    val ownerUid: String = ""
+    val ownerUid: String = "",
+    @ColumnInfo(defaultValue = "'local'") val source: String = "local"
 )
 
 @Dao
@@ -39,8 +41,57 @@ interface FavoriteDao {
     @Query("DELETE FROM favorites WHERE ownerUid = :ownerUid AND tid = :tid")
     suspend fun deleteByTid(ownerUid: String, tid: String)
 
+    @Query("DELETE FROM favorites WHERE ownerUid = :ownerUid AND tid = :tid AND source = 'server'")
+    suspend fun deleteServerCache(ownerUid: String, tid: String)
+
     @Query("UPDATE favorites SET folder = :folder WHERE ownerUid = :ownerUid AND tid = :tid")
     suspend fun updateFolder(ownerUid: String, tid: String, folder: String)
+}
+
+@Entity(tableName = "server_favorite_folders", primaryKeys = ["ownerUid", "folderId"])
+data class ServerFavoriteFolderEntity(
+    val ownerUid: String,
+    val folderId: String,
+    val name: String,
+    val count: Int,
+    val isDefault: Boolean
+)
+
+@Entity(tableName = "server_favorite_memberships", primaryKeys = ["ownerUid", "tid", "folderId"])
+data class ServerFavoriteMembershipEntity(
+    val ownerUid: String,
+    val tid: String,
+    val folderId: String
+)
+
+@Dao
+interface ServerFavoriteDao {
+    @Query("SELECT * FROM server_favorite_folders WHERE ownerUid = :ownerUid ORDER BY isDefault DESC, folderId")
+    suspend fun folders(ownerUid: String): List<ServerFavoriteFolderEntity>
+
+    @Query("SELECT * FROM server_favorite_memberships WHERE ownerUid = :ownerUid AND tid = :tid")
+    suspend fun memberships(ownerUid: String, tid: String): List<ServerFavoriteMembershipEntity>
+
+    @Query("SELECT * FROM server_favorite_memberships WHERE ownerUid = :ownerUid")
+    suspend fun allMemberships(ownerUid: String): List<ServerFavoriteMembershipEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun putFolder(folder: ServerFavoriteFolderEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun putMembership(membership: ServerFavoriteMembershipEntity)
+
+    @Query("DELETE FROM server_favorite_folders WHERE ownerUid = :ownerUid")
+    suspend fun clearFolders(ownerUid: String)
+
+    @Query("DELETE FROM server_favorite_memberships WHERE ownerUid = :ownerUid")
+    suspend fun clearMemberships(ownerUid: String)
+
+    @Query("DELETE FROM server_favorite_memberships WHERE ownerUid = :ownerUid AND tid = :tid AND folderId = :folderId")
+    suspend fun deleteMembership(ownerUid: String, tid: String, folderId: String)
+
+    @Query("DELETE FROM server_favorite_memberships WHERE ownerUid = :ownerUid AND tid = :tid")
+    suspend fun clearMembershipsForTid(ownerUid: String, tid: String)
 }
 
 @Entity(tableName = "history", primaryKeys = ["ownerUid", "tid"])
@@ -203,13 +254,16 @@ interface FavoriteBoardDao {
         FavoriteBoardEntity::class,
         ResponseCacheEntity::class,
         DraftEntity::class,
-        WatchedThreadEntity::class
+        WatchedThreadEntity::class,
+        ServerFavoriteFolderEntity::class,
+        ServerFavoriteMembershipEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun favoriteDao(): FavoriteDao
+    abstract fun serverFavoriteDao(): ServerFavoriteDao
     abstract fun historyDao(): HistoryDao
     abstract fun favoriteBoardDao(): FavoriteBoardDao
     abstract fun responseCacheDao(): ResponseCacheDao

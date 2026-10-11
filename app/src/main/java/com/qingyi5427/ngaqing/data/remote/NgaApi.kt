@@ -7,6 +7,7 @@ import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Query
 import retrofit2.http.Tag
+import retrofit2.Response
 
 interface NgaApi {
     @GET("app_api.php")
@@ -139,23 +140,28 @@ interface NgaApi {
     suspend fun addServerFavorite(
         @Query("__lib") lib: String = "topic_favor_v2",
         @Query("__act") act: String = "add",
-        @Field("action") action: String = "add",
-        @Field("folder") folder: Int = 1,
+        @Field("folder") folder: String,
         @Field("tid") tid: String,
-        @Field("pid") pid: String = "",
+        @Field("pid") pid: String = "0",
         @Query("__output") output: Int = 8,
         @Tag session: RequestPreferences? = null
     ): String
 
+    @POST("nuke.php")
+    suspend fun listServerFavoriteFolders(
+        @Query("__lib") lib: String = "topic_favor_v2",
+        @Query("__act") act: String = "list_folder",
+        @Query("page") page: Int = 1,
+        @Query("__output") output: Int = 8,
+        @Tag session: RequestPreferences? = null
+    ): Response<String>
+
     @FormUrlEncoded
     @POST("nuke.php")
     suspend fun removeServerFavorite(
-        @Query("__lib") lib: String = "topic_favor",
-        @Query("__act") act: String = "topic_favor",
-        @Field("action") action: String = "del",
-        @Field("raw") raw: Int = 3,
-        @Field("tid") tid: String,
-        @Field("page") page: Int = 1,
+        @Query("__lib") lib: String = "topic_favor_v2",
+        @Query("__act") act: String = "del",
+        @Field("folder") folder: String,
         @Field("tidarray") tidArray: String,
         @Query("__output") output: Int = 8,
         @Tag session: RequestPreferences? = null

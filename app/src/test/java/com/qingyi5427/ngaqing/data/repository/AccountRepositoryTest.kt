@@ -25,6 +25,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import retrofit2.Response
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28])
@@ -38,11 +39,9 @@ class AccountRepositoryTest {
 
     @Test fun sameLocalKeysRemainIndependentAcrossAccounts() = runBlocking {
         prefs.saveAuth("account-a", "cid-a", "A")
-        coEvery { api.addServerFavorite(tid = any(), session = any()) } returns
-            """{"data":{"0":0,"1":"收藏成功"}}"""
         coEvery { api.threadList(fid = "10", page = 1, session = any()) } returns threadPage("1", "A")
         repo.saveDraft(DraftEntity(key = "reply:1", kind = "reply", content = "A draft"))
-        assertTrue(repo.addFavorite("1", "A favorite").isSuccess)
+        repo.addLocalFavorite("1", "A favorite")
         repo.getThreads(fid = "10")
         val cacheKey = "threads:10::1::false:false"
         withTimeout(3_000) {
@@ -54,7 +53,7 @@ class AccountRepositoryTest {
         assertFalse(repo.isFavorite("1"))
         assertNull(db.responseCacheDao().get("account-b", cacheKey))
         repo.saveDraft(DraftEntity(key = "reply:1", kind = "reply", content = "B draft"))
-        assertTrue(repo.addFavorite("1", "B favorite").isSuccess)
+        repo.addLocalFavorite("1", "B favorite")
         coEvery { api.threadList(fid = "10", page = 1, session = any()) } returns threadPage("1", "B")
         repo.getThreads(fid = "10")
         withTimeout(3_000) {
@@ -96,6 +95,8 @@ class AccountRepositoryTest {
 
     @Test fun failedSecondFavoritePageDoesNotPartiallyImport() = runBlocking {
         prefs.saveAuth("account-a", "cid-a", "A")
+        coEvery { api.listServerFavoriteFolders(session = any()) } returns
+            Response.success("""{"data":{"0":{"1":{"id":"1","name":"默认","length":"2","default":1}}}}""")
         coEvery { api.threadList(page = 1, favor = 1, session = any()) } returns threadPage("1", "one", total = 2)
         coEvery { api.threadList(page = 2, favor = 1, session = any()) } returns
             """{"error":{"0":"2:服务端失败"}}"""

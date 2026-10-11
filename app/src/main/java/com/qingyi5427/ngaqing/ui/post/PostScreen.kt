@@ -125,6 +125,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.focus.onFocusChanged
@@ -251,13 +252,18 @@ private fun PostScreenContent(
     var jumpText by remember { mutableStateOf("") }
     var pagePickerOpen by remember { mutableStateOf(false) }
     var pageText by remember { mutableStateOf("") }
+    var pendingFavoriteRemoval by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var pendingFavoriteCreation by remember { mutableStateOf(false) }
     val replying by viewModel.replying.collectAsStateWithLifecycle()
     val replyResult by viewModel.replyResult.collectAsStateWithLifecycle()
     val replySucceeded by viewModel.replySucceeded.collectAsStateWithLifecycle()
     val favoriteError by viewModel.favoriteError.collectAsStateWithLifecycle()
+    val favoriteFolderUiState by viewModel.favoriteFolderUiState.collectAsStateWithLifecycle()
+    val favoriteBusy by viewModel.favoriteBusy.collectAsStateWithLifecycle()
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val dockBlocked = replyOpen || pagePickerOpen || jumpOpen || menuOpen ||
-        openFloorMenuPid != null || favoriteError != null || dockPressed ||
+        openFloorMenuPid != null || favoriteError != null ||
+        favoriteFolderUiState !is FavoriteFolderUiState.Closed || dockPressed ||
         viewerUrl.value != null || imeVisible || dockHasFocus || touchExploration
     val readingState = if (webFallback.value) null else s as? PostUiState.Success
     val readingPage = readingState?.let {
@@ -280,16 +286,162 @@ private fun PostScreenContent(
         if (webFallback.value) viewModel.prepareWebCookies()
     }
 
-    if (favoriteError != null) {
+    if (favoriteError != null && favoriteFolderUiState is FavoriteFolderUiState.Closed) {
         AlertDialog(
             onDismissRequest = viewModel::dismissFavoriteError,
-            title = { Text("收藏同步失败") },
+            title = { Text("收藏失败") },
             text = { Text(favoriteError.orEmpty()) },
             confirmButton = {
-                TextButton(onClick = viewModel::retryFavorite) { Text("重试同步") }
+                TextButton(onClick = viewModel::dismissFavoriteError) { Text("知道了") }
+            }
+        )
+    }
+
+    if (favoriteFolderUiState !is FavoriteFolderUiState.Closed) {
+        val folderState = favoriteFolderUiState
+        AlertDialog(
+            onDismissRequest = {
+                if (!favoriteBusy) {
+                    viewModel.dismissFavoriteFolders()
+                    viewModel.dismissFavoriteError()
+                }
+            },
+            title = { Text("选择收藏文件夹") },
+            text = {
+                when (folderState) {
+                    FavoriteFolderUiState.Closed -> Unit
+                    FavoriteFolderUiState.Loading -> Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                        Text("正在读取 NGA 文件夹…")
+                    }
+                    is FavoriteFolderUiState.Error -> Text(folderState.message)
+                    is FavoriteFolderUiState.Ready -> {
+                        val selection = folderState.selection
+                        Column(
+                            Modifier.heightIn(
+                                max = (LocalConfiguration.current.screenHeightDp * 0.42f).dp
+                            ).verticalScroll(rememberScrollState())
+                                .testTag("post-favorite-folder-list"),
+                            verticalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            if (selection.hasLocalCopy && selection.selectedIds.isEmpty()) {
+                                Text(
+                                    "此帖已有本地收藏，尚未确认在 NGA 文件夹中。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(bottom = 8.dp)
+                                )
+                            }
+                            if (selection.folders.isEmpty()) {
+                                Text("当前账号还没有云收藏文件夹，可新建一个并收藏此帖。")
+                            }
+                            selection.folders.forEach { folder ->
+                                val selected = folder.id in selection.selectedIds
+                                val subtitle = "${folder.count} 个主题" +
+                                    (if (folder.isDefault) " · 默认" else "") +
+                                    (if (selected) " · 已收藏" else " · 点按收藏到此文件夹")
+                                val rowModifier = Modifier.fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .then(
+                                        if (selected) Modifier else Modifier.clickable(enabled = !favoriteBusy) {
+                                            viewModel.addToFavoriteFolder(folder.id)
+                                        }
+                                    )
+                                    .padding(horizontal = 10.dp, vertical = 10.dp)
+                                Row(
+                                    modifier = rowModifier,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        if (selected) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
+                                        contentDescription = null,
+                                        tint = if (selected) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                                        Text(folder.name, style = MaterialTheme.typography.bodyMedium,
+                                            modifier = Modifier.testTag("post-favorite-folder-label-${folder.id}"))
+                                        Text(
+                                            subtitle,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    if (selected) {
+                                        TextButton(
+                                            onClick = { pendingFavoriteRemoval = folder.id to folder.name },
+                                            enabled = !favoriteBusy,
+                                            modifier = Modifier.testTag("post-favorite-remove-${folder.id}")
+                                        ) { Text("移除") }
+                                    }
+                                }
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable(enabled = !favoriteBusy) { pendingFavoriteCreation = true }
+                                    .padding(horizontal = 10.dp, vertical = 12.dp)
+                                    .testTag("post-favorite-create-folder"),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Filled.Add, contentDescription = null)
+                                Text("新建云收藏夹并收藏此帖",
+                                    modifier = Modifier.padding(start = 12.dp))
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                if (folderState is FavoriteFolderUiState.Error) {
+                    TextButton(onClick = viewModel::openFavoriteFolders) { Text("重新读取") }
+                } else {
+                    TextButton(onClick = viewModel::dismissFavoriteFolders,
+                        enabled = !favoriteBusy) { Text("完成") }
+                }
             },
             dismissButton = {
-                TextButton(onClick = viewModel::dismissFavoriteError) { Text("稍后处理") }
+                TextButton(onClick = {
+                    viewModel.dismissFavoriteFolders()
+                    viewModel.dismissFavoriteError()
+                }, enabled = !favoriteBusy) { Text("关闭") }
+            }
+        )
+    }
+    pendingFavoriteRemoval?.let { (folderId, folderName) ->
+        AlertDialog(
+            onDismissRequest = { pendingFavoriteRemoval = null },
+            title = { Text("从文件夹移除") },
+            text = { Text("确定从“$folderName”移除此主题吗？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingFavoriteRemoval = null
+                    viewModel.removeFromFavoriteFolder(folderId)
+                }, modifier = Modifier.testTag("post-favorite-confirm-remove")) { Text("移除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingFavoriteRemoval = null }) { Text("保留") }
+            }
+        )
+    }
+    if (pendingFavoriteCreation) {
+        AlertDialog(
+            onDismissRequest = { pendingFavoriteCreation = false },
+            title = { Text("新建云收藏夹") },
+            text = { Text("将在 NGA 新建收藏夹，并把此帖收藏进去。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingFavoriteCreation = false
+                    viewModel.createFavoriteFolderAndAdd()
+                }, modifier = Modifier.testTag("post-favorite-confirm-create-folder")) {
+                    Text("新建并收藏")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingFavoriteCreation = false }) { Text("取消") }
             }
         )
     }
@@ -353,7 +505,8 @@ private fun PostScreenContent(
 
     SwipeBackContainer(
         onBack = { nav.popBackStack() },
-        enabled = viewerUrl.value == null && !replyOpen && !pagePickerOpen && !jumpOpen,
+        enabled = viewerUrl.value == null && !replyOpen && !pagePickerOpen && !jumpOpen &&
+            favoriteFolderUiState is FavoriteFolderUiState.Closed,
         // WebView 必须独占内容区触摸；否则斜向的上下滑会被全屏右滑返回识别器截断。
         // 网页模式仍保留 Android 左侧边缘的系统预测性返回。
         contentSwipeEnabled = !webFallback.value
@@ -410,10 +563,10 @@ private fun PostScreenContent(
                     }
                 }
             }
-            IconButton(onClick = viewModel::toggleFavorite, modifier = Modifier.size(48.dp)) {
+            IconButton(onClick = viewModel::openFavoriteFolders, modifier = Modifier.size(48.dp)) {
                 Icon(
                     if (fav) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
-                    contentDescription = if (fav) "取消收藏" else "收藏",
+                    contentDescription = if (fav) "管理收藏文件夹" else "选择收藏文件夹",
                     modifier = Modifier.size(20.dp),
                     tint = if (fav) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -1464,6 +1617,53 @@ private fun RenderBlock(
                         contentDescription = null,
                         modifier = Modifier.size(20.dp)
                     )
+                }
+            }
+        }
+        is PostBlock.VideoLink -> {
+            val context = LocalContext.current
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 5.dp)
+                    .testTag("post-video-link")
+                    .clickable {
+                        runCatching {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(block.url)).apply {
+                                    addCategory(Intent.CATEGORY_BROWSABLE)
+                                }
+                            )
+                        }.onFailure {
+                            Toast.makeText(context, "找不到可打开视频的应用", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f),
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        modifier = Modifier.size(38.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null,
+                                modifier = Modifier.size(23.dp))
+                        }
+                    }
+                    Column(Modifier.padding(start = 12.dp).weight(1f)) {
+                        Text(block.label, style = MaterialTheme.typography.labelLarge)
+                        Text("点按打开视频", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f))
+                    }
+                    Icon(Icons.Default.OpenInBrowser, contentDescription = null,
+                        modifier = Modifier.size(20.dp))
                 }
             }
         }

@@ -3,6 +3,7 @@ package com.qingyi5427.ngaqing.ui.favorites
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -71,7 +72,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -92,6 +96,7 @@ import com.qingyi5427.ngaqing.ui.design.NgaBackdropScope
 import com.qingyi5427.ngaqing.ui.design.ngaBackdropSource
 import com.qingyi5427.ngaqing.ui.util.formatAuthorName
 import com.qingyi5427.ngaqing.ui.util.formatRelative
+import com.qingyi5427.ngaqing.ui.post.FavoriteFolderUiState
 
 @Composable
 fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hiltViewModel()) {
@@ -101,6 +106,9 @@ fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hilt
     val syncMessage by viewModel.syncMessage.collectAsStateWithLifecycle()
     val syncError by viewModel.syncError.collectAsStateWithLifecycle()
     val actionError by viewModel.actionError.collectAsStateWithLifecycle()
+    val manageFavorite by viewModel.manageFavorite.collectAsStateWithLifecycle()
+    val manageState by viewModel.manageState.collectAsStateWithLifecycle()
+    val actionBusy by viewModel.actionBusy.collectAsStateWithLifecycle()
     val visitedTids by viewModel.visitedTids.collectAsStateWithLifecycle()
     val policy = LocalV8LayoutPolicy.current
     val compactHeight = policy.compactHeight || LocalConfiguration.current.screenHeightDp < 480
@@ -110,8 +118,8 @@ fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hilt
     val dockClearance = 96.dp + with(LocalDensity.current) {
         WindowInsets.navigationBars.getBottom(this).toDp()
     }
-    var pendingDelete by remember { mutableStateOf<FavoriteEntity?>(null) }
     var pendingMove by remember { mutableStateOf<FavoriteEntity?>(null) }
+    var pendingCloudRemoval by remember { mutableStateOf<Pair<String, String>?>(null) }
     var folderInput by remember { mutableStateOf("") }
     var query by rememberSaveable { mutableStateOf("") }
     var searchOpen by rememberSaveable { mutableStateOf(false) }
@@ -155,10 +163,13 @@ fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hilt
         AlertDialog(
             onDismissRequest = viewModel::dismissActionError,
             shape = RoundedCornerShape(12.dp),
-            title = { Text("收藏删除未同步") },
+            title = { Text("NGA 收藏操作未确认") },
             text = { Text(actionError.orEmpty()) },
-            confirmButton = { TextButton(onClick = viewModel::retryFavorite, modifier = Modifier.heightIn(min = 48.dp)) { Text("重试同步") } },
-            dismissButton = { TextButton(onClick = viewModel::dismissActionError, modifier = Modifier.heightIn(min = 48.dp)) { Text("稍后处理") } }
+            confirmButton = { TextButton(onClick = {
+                viewModel.dismissActionError()
+                manageFavorite?.let(viewModel::openManage)
+            }, modifier = Modifier.heightIn(min = 48.dp)) { Text("重新查看文件夹") } },
+            dismissButton = { TextButton(onClick = viewModel::dismissActionError, modifier = Modifier.heightIn(min = 48.dp)) { Text("知道了") } }
         )
     }
     NgaBackdropScope {
@@ -203,7 +214,7 @@ fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hilt
                 ) {
                     gridItems(visibleFavorites, key = { it.tid }) { favorite ->
                         val open = { nav.navigate(Routes.postRoute(favorite.tid)) }
-                        val delete = { pendingDelete = favorite }
+                        val delete = { viewModel.openManage(favorite) }
                         val move = { pendingMove = favorite; folderInput = favorite.folder }
                         if (twoColumns) FavoriteCard(favorite, policy.mediumComfortTypography,
                             favorite.tid in visitedTids, open, delete, move)
@@ -245,31 +256,98 @@ fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hilt
         )
     }
 
-    pendingDelete?.let { favorite ->
+    if (manageState != FavoriteFolderUiState.Closed) {
         AlertDialog(
-            onDismissRequest = { pendingDelete = null },
+            onDismissRequest = viewModel::dismissManage,
             shape = RoundedCornerShape(12.dp),
-            title = { Text("取消收藏？") },
+            title = { Text("管理收藏") },
             text = {
-                Text(
-                    favorite.title.ifBlank { "（无标题）" },
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        viewModel.remove(favorite.tid)
-                        pendingDelete = null
-                    },
-                    modifier = Modifier.heightIn(min = 48.dp)
-                ) {
-                    Text("取消收藏", color = MaterialTheme.colorScheme.error)
+                when (val state = manageState) {
+                    FavoriteFolderUiState.Closed -> Unit
+                    FavoriteFolderUiState.Loading -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.width(24.dp))
+                        Text("正在读取 NGA 收藏文件夹…", modifier = Modifier.padding(start = 12.dp))
+                    }
+                    is FavoriteFolderUiState.Error -> Text(state.message)
+                    is FavoriteFolderUiState.Ready -> Column(
+                        Modifier.heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.42f).dp)
+                            .verticalScroll(rememberScrollState())
+                            .testTag("favorite-manage-folder-list")
+                    ) {
+                        Text("NGA 云收藏文件夹", style = MaterialTheme.typography.titleSmall)
+                        if (state.selection.folders.isEmpty()) {
+                            Text("没有可用的云收藏文件夹", modifier = Modifier.padding(vertical = 10.dp))
+                        } else {
+                            state.selection.folders.forEach { folder ->
+                                val selected = folder.id in state.selection.selectedIds
+                                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    Text((if (selected) "✓  " else "") + folder.name +
+                                        (if (folder.isDefault) " · 默认" else ""),
+                                        modifier = Modifier.weight(1f)
+                                            .testTag("favorite-manage-folder-label-${folder.id}"),
+                                        maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    if (selected) {
+                                        TextButton(
+                                            onClick = { pendingCloudRemoval = folder.id to folder.name },
+                                            enabled = !actionBusy,
+                                            modifier = Modifier.heightIn(min = 48.dp)
+                                                .testTag("favorite-manage-remove-${folder.id}")
+                                        ) { Text("移除", color = MaterialTheme.colorScheme.error) }
+                                    } else {
+                                        TextButton(
+                                            onClick = { viewModel.addServerFolder(folder.id) },
+                                            enabled = !actionBusy,
+                                            modifier = Modifier.heightIn(min = 48.dp)
+                                                .testTag("favorite-manage-add-${folder.id}")
+                                        ) { Text("加入") }
+                                    }
+                                }
+                            }
+                        }
+                        if (state.selection.hasLocalCopy) {
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                            Text("另存有本地收藏，可单独移除。", style = MaterialTheme.typography.bodySmall)
+                            TextButton(
+                                onClick = viewModel::removeLocalCopy,
+                                enabled = !actionBusy,
+                                modifier = Modifier.heightIn(min = 48.dp)
+                            ) { Text("移除本地收藏", color = MaterialTheme.colorScheme.error) }
+                        }
+                    }
                 }
             },
+            confirmButton = {
+                TextButton(onClick = viewModel::dismissManage, enabled = !actionBusy,
+                    modifier = Modifier.heightIn(min = 48.dp)) { Text("关闭") }
+            },
             dismissButton = {
-                TextButton(onClick = { pendingDelete = null }, modifier = Modifier.heightIn(min = 48.dp)) { Text("保留") }
+                if (manageState is FavoriteFolderUiState.Error) {
+                    TextButton(onClick = { manageFavorite?.let(viewModel::openManage) },
+                        modifier = Modifier.heightIn(min = 48.dp)) { Text("重新读取") }
+                }
+            }
+        )
+    }
+
+    pendingCloudRemoval?.let { (folderId, folderName) ->
+        AlertDialog(
+            onDismissRequest = { pendingCloudRemoval = null },
+            shape = RoundedCornerShape(12.dp),
+            title = { Text("从文件夹移除") },
+            text = { Text("确定从“$folderName”移除此主题吗？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingCloudRemoval = null
+                    viewModel.removeServerFolder(folderId)
+                }, modifier = Modifier.heightIn(min = 48.dp)
+                    .testTag("favorite-manage-confirm-remove")) { Text("移除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingCloudRemoval = null },
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("favorite-manage-keep")) {
+                    Text("保留")
+                }
             }
         )
     }
@@ -283,14 +361,15 @@ fun FavoritesScreen(nav: NavHostController, viewModel: FavoritesViewModel = hilt
                 OutlinedTextField(
                     value = folderInput,
                     onValueChange = { folderInput = it },
-                    label = { Text("分组名称") },
+                    label = { Text("本地分组名称") },
                     singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
-                    viewModel.move(favorite.tid, folderInput)
+                    viewModel.move(favorite, folderInput)
                     pendingMove = null
                 }, modifier = Modifier.heightIn(min = 48.dp)) { Text("移动") }
             },
@@ -422,11 +501,11 @@ private fun FavoritesTools(
                     }
                     if (folders.isNotEmpty()) {
                         HorizontalDivider()
-                        DropdownMenuItem(text = { Text("全部分组") }, onClick = {
+                        DropdownMenuItem(text = { Text("全部本地分组") }, onClick = {
                             menuOpen = false; onFolderSelect(null)
                         })
                         folders.forEach { folder ->
-                            DropdownMenuItem(text = { Text("分组 · $folder") }, onClick = {
+                            DropdownMenuItem(text = { Text("本地分组 · $folder") }, onClick = {
                                 menuOpen = false; onFolderSelect(folder)
                             })
                         }
@@ -439,7 +518,7 @@ private fun FavoritesTools(
                 onClearQuery(); onFolderSelect(null)
             }, modifier = Modifier.heightIn(min = 48.dp)) {
                 Text(listOfNotNull(query.takeIf { it.isNotBlank() }?.let { "搜索：$it" },
-                    selectedFolder?.let { "分组：$it" }).joinToString("  ·  ") + "  ×",
+                    selectedFolder?.let { "本地分组：$it" }).joinToString("  ·  ") + "  ×",
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
@@ -480,7 +559,7 @@ private fun SwipeToDeleteFavorite(
             ) {
                 if (state.targetValue == SwipeToDismissBoxValue.EndToStart) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("取消收藏", style = MaterialTheme.typography.labelLarge,
+                        Text("管理收藏", style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onErrorContainer)
                         Icon(Icons.Filled.DeleteOutline, contentDescription = null,
                             tint = MaterialTheme.colorScheme.onErrorContainer,
@@ -513,13 +592,15 @@ private fun FavoriteCard(
     ) {
         Column(Modifier.padding(start = 17.dp, end = 9.dp, top = 13.dp, bottom = 8.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(item.folder.ifBlank { "默认分组" },
+                Text("本地 · ${item.folder.ifBlank { "默认分组" }}",
                     color = MaterialTheme.colorScheme.primary,
                     fontSize = if (comfortable) 13.sp else 12.sp,
                     lineHeight = if (comfortable) 18.sp else 16.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f))
+                    modifier = Modifier.weight(1f).semantics {
+                        contentDescription = "本地分组：${item.folder.ifBlank { "默认分组" }}"
+                    })
                 Surface(shape = RoundedCornerShape(7.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant) {
                     Text(if (visited) "已读" else "稍后再读",
@@ -552,7 +633,7 @@ private fun FavoriteCard(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        DropdownMenuItem(text = { Text("移动到其他分组") }, onClick = {
+                        DropdownMenuItem(text = { Text("移动到其他本地分组") }, onClick = {
                             menuOpen = false; onMove()
                         })
                         DropdownMenuItem(text = { Text("取消收藏") }, onClick = {
