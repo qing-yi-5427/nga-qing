@@ -1,0 +1,128 @@
+{
+  "baseline_commit": "95a3443efe0aa3d082fcce535185942f4201416c",
+  "files": {
+    "original": {
+      "name": "nga-qing-1.2.5-v8.apk",
+      "size": 2319009,
+      "sha256": "E4D3239F10EB790E3CD398AA15229AA9F2C443DEE21234F99FA6754068BD6DC3",
+      "entries": 158,
+      "signing_block_entries": {
+        "0x7109871A": {
+          "length": 1390,
+          "sha256": "58994B3C5B9D1CDD256477262736918991E4E52BAF7200FB7A425CF9DE9CE44C"
+        },
+        "0x504B4453": {
+          "length": 9066,
+          "sha256": "4FF7A85FC2DDBA6BA343B37DA7DFFE044FDF7860A9FAC8F26BDA257F208A6CD7"
+        },
+        "0x42726577": {
+          "length": 1764,
+          "sha256": "F9A8C9B949A6F1BB9A980B9575944ABEAEAC8907C22D7386C95909C67E11982A"
+        }
+      }
+    },
+    "rebuilt_first": {
+      "name": "nga-rebuilt-first.apk",
+      "size": 2319009,
+      "sha256": "67EF8E1ADE428357B831184B7F7BEA7BAA922CE2216CD1F62DCFC742D8BDAF1A",
+      "entries": 158,
+      "signing_block_entries": {
+        "0x7109871A": {
+          "length": 1390,
+          "sha256": "CAB35B1555702F82058BAF1276079D260FFFBA8F85C2DE377F03CD6F02624A2E"
+        },
+        "0x504B4453": {
+          "length": 9066,
+          "sha256": "F6C1219AF2E7E455A35DD77FCA6CABCA78CF9794CDFBF49384DF450AFF130306"
+        },
+        "0x42726577": {
+          "length": 1764,
+          "sha256": "F9A8C9B949A6F1BB9A980B9575944ABEAEAC8907C22D7386C95909C67E11982A"
+        }
+      }
+    },
+    "rebuilt_clean": {
+      "name": "nga-qing-1.2.5-from-95a3443.apk",
+      "size": 2319009,
+      "sha256": "E13CA3267FF4A98DBE27415B3FD701743CCAB5D1658296D9792DB07533979B6D",
+      "entries": 158,
+      "signing_block_entries": {
+        "0x7109871A": {
+          "length": 1390,
+          "sha256": "CAB35B1555702F82058BAF1276079D260FFFBA8F85C2DE377F03CD6F02624A2E"
+        },
+        "0x504B4453": {
+          "length": 9066,
+          "sha256": "01A58251417B4823A1FCDC874579A839A3217F276AF209787E6D60CFB75C6377"
+        },
+        "0x42726577": {
+          "length": 1764,
+          "sha256": "F9A8C9B949A6F1BB9A980B9575944ABEAEAC8907C22D7386C95909C67E11982A"
+        }
+      }
+    }
+  },
+  "original_vs_rebuilt_clean": {
+    "only_first": [],
+    "only_second": [],
+    "changed_contents": [
+      {
+        "entry": "assets/dexopt/baseline.prof",
+        "first_size": 4830,
+        "second_size": 4832,
+        "first_sha256": "882160E9CD05A436C6547244A24D800BA6339B4B941FE5016460677D7AACA697",
+        "second_sha256": "C15CF5738C795EADC0A087D8C08B89FAB84D1B48DA31F90BEF4494F3B04EDB1F"
+      },
+      {
+        "entry": "classes.dex",
+        "first_size": 3946840,
+        "second_size": 3946820,
+        "first_sha256": "2C06C8A4A0B5BD33A945D341E1816D9EB3310D5EE3D530399EF18248FEABB20F",
+        "second_sha256": "8C8777696810385E7EFA608DDD0582BD8CE1909AB1CC8F9DC3D5E781CDED5CC3"
+      }
+    ],
+    "zip_metadata_changed": [
+      "assets/dexopt/baseline.prof",
+      "assets/dexopt/baseline.profm",
+      "classes.dex",
+      "lib/arm64-v8a/libandroidx.graphics.path.so"
+    ]
+  },
+  "rebuilt_first_vs_clean": {
+    "only_first": [],
+    "only_second": [],
+    "changed_contents": [],
+    "zip_metadata_changed": []
+  },
+  "tests": {
+    "favorite_targeted": 40,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "rebuild_status": [
+    "BUILD SUCCESSFUL",
+    "BUILD SUCCESSFUL"
+  ],
+  "phone_read_only_acceptance": {
+    "previous_version": "1.2.1",
+    "previous_version_code": 6,
+    "previous_apk_sha256": "0A66FF777C35DE2E558DB8EB88F58020156EBE0E2A5C6AD185681B922771B380",
+    "signature_matches_candidate": true,
+    "install_keep_data_result": "Success",
+    "installed_version": "1.2.5",
+    "installed_version_code": 10,
+    "uid_unchanged": true,
+    "first_install_time_unchanged": true,
+    "installed_base_apk_sha256": "E13CA3267FF4A98DBE27415B3FD701743CCAB5D1658296D9792DB07533979B6D",
+    "cold_launch_success": true,
+    "current_session_crash_observed": false,
+    "public_board_and_reader_smoke": "not_completed_input_injection_denied",
+    "public_screenshot_ready": false
+  },
+  "published_asset": {
+    "name": "nga-qing-1.2.5-v8.apk",
+    "sha256": "E13CA3267FF4A98DBE27415B3FD701743CCAB5D1658296D9792DB07533979B6D",
+    "tag": "v1.2.5"
+  }
+}
